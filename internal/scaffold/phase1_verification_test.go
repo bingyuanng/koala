@@ -49,10 +49,19 @@ func TestRenderedServiceBuilds(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	checksums, err := os.ReadFile(filepath.Join(root, "go.sum"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "go.sum"), checksums, 0600); err != nil {
+		t.Fatal(err)
+	}
 	// Use this checkout and its cached dependencies rather than a published release.
+	// A build resolves only application dependencies. Tidy also loads dependency
+	// tests, whose modules need not be cached by an ordinary repository build.
 	for _, args := range [][]string{
 		{"mod", "edit", "-replace=github.com/bingyuanng/koala=" + root},
-		{"mod", "tidy"},
+		{"build", "-mod=mod", "./..."},
 		{"build", "-mod=readonly", "./..."},
 	} {
 		cmd := exec.Command("go", args...)
