@@ -1,0 +1,23 @@
+name: Go checks
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Check formatting
+        run: scripts/check-format.sh
+      - name: Check version contract
+        run: python3 scripts/tools.py check
+      - name: Build
+        run: go build ./...
+      - name: Test
+        run: go test ./...

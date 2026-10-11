@@ -1,0 +1,133 @@
+package scaffold
+
+import (
+	"go/parser"
+	"go/token"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+	"testing/fstest"
+)
+
+func TestEmbeddedTemplates(t *testing.T) {
+	for _, kind := range []string{"project", "service"} {
+		data := Data{ModulePath: "example.com/import-path", ProjectName: "Display Name", ServiceName: "Accounts", FrameworkVersion: "v0.1.2"}
+		files, err := Render(kind, data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		again, err := Render(kind, data)
+		if err != nil || !reflect.DeepEqual(files, again) {
+			t.Fatal("rendering is not deterministic")
+		}
+		joined := ""
+		foundDotfile := false
+		for _, f := range files {
+			joined += f.Content
+			if f.Path == ".gitignore" {
+				foundDotfile = true
+			}
+			if strings.HasSuffix(f.Path, ".go") {
+				if _, err := parser.ParseFile(token.NewFileSet(), f.Path, f.Content, parser.AllErrors); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if strings.HasSuffix(f.Path, ".tmpl") {
+				t.Fatal("template suffix leaked")
+			}
+		}
+		if !strings.Contains(joined, data.ModulePath) {
+			t.Fatal("module path lost")
+		}
+		if kind == "project" && (!foundDotfile || !strings.Contains(joined, data.ProjectName) || !strings.Contains(joined, data.FrameworkVersion)) {
+			t.Fatal("project data or dotfile lost")
+		}
+		if kind == "service" && (files[0].Path != "Accounts/service.go" || !strings.Contains(joined, "type Accounts struct")) {
+			t.Fatal("service mapping lost")
+		}
+	}
+}
+
+func TestRenderErrorsAreAtomic(t *testing.T) {
+	tests := []struct {
+		name     string
+		root     fstest.MapFS
+		data     any
+		fragment string
+	}{
+		{"missing value", fstest.MapFS{"file.tmpl": {Data: []byte(`{{.Missing}}`)}}, map[string]string{}, "Missing"},
+		{"invalid syntax", fstest.MapFS{"file.tmpl": {Data: []byte(`{{`)}}, Data{}, "parse template"},
+		{"traversal", fstest.MapFS{"{{.Path}}.tmpl": {Data: []byte(`ok`)}}, map[string]string{"Path": "../escape"}, "unsafe output path"},
+		{"absolute", fstest.MapFS{"{{.Path}}.tmpl": {Data: []byte(`ok`)}}, map[string]string{"Path": "/escape"}, "unsafe output path"},
+		{"windows", fstest.MapFS{"{{.Path}}.tmpl": {Data: []byte(`ok`)}}, map[string]string{"Path": `C:\escape`}, "unsafe output path"},
+		{"collision", fstest.MapFS{"a": {Data: []byte(`one`)}, "a.tmpl": {Data: []byte(`two`)}}, Data{}, "duplicate output path"},
+		{"invalid Go", fstest.MapFS{"file.go.tmpl": {Data: []byte(`package`)}}, Data{}, "format Go"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			files, err := renderFS(tt.root, tt.data)
+			if err == nil || !strings.Contains(err.Error(), tt.fragment) || files != nil {
+				t.Fatalf("files=%v err=%v", files, err)
+			}
+		})
+	}
+	if _, err := Render("project", Data{}); err == nil {
+		t.Fatal("empty inputs accepted")
+	}
+}
+
+func TestEmbeddedAssetsOutsideRepository(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	binary := filepath.Join(outside, "scaffold.test")
+	build := exec.Command("go", "test", "-c", "-o", binary, "./internal/scaffold")
+	build.Dir = root
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build asset test: %v, %s", err, output)
+	}
+	check := exec.Command(binary, "-test.run=^TestEmbeddedTemplates$")
+	check.Dir = outside
+	if output, err := check.CombinedOutput(); err != nil {
+		t.Fatalf("relocated assets: %v, %s", err, output)
+	}
+}
+
+func TestRenderedProjectBuilds(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := Render("project", Data{
+		ModulePath: "example.com/independent", ProjectName: "Display Name",
+		ServiceName: "Accounts", FrameworkVersion: "v0.1.0",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := t.TempDir()
+	for _, file := range files {
+		target := filepath.Join(project, file.Path)
+		if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(target, []byte(file.Content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	edit := exec.Command("go", "mod", "edit", "-replace=github.com/bingyuanng/koala="+root)
+	edit.Dir = project
+	if output, err := edit.CombinedOutput(); err != nil {
+		t.Fatalf("project module: %v, %s", err, output)
+	}
+	build := exec.Command("go", "build", "-mod=readonly", ".")
+	build.Dir = project
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("rendered project build: %v, %s", err, output)
+	}
+}

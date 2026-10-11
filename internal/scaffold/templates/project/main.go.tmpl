@@ -1,0 +1,13 @@
+package main
+
+import (
+ "fmt"
+ "github.com/bingyuanng/koala/config"
+)
+
+// This foundation template will gain runtime startup in Phase 3.
+func main() {
+ cfg := config.DefaultConfig()
+ cfg.App.Name = {{printf "%q" .ProjectName}}
+ fmt.Println(cfg.App.Name, cfg.Server.HTTP.Port)
+}

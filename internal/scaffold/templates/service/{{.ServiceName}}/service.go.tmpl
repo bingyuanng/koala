@@ -1,0 +1,6 @@
+package service
+
+// The transport embedding and annotated factory will be added in Phase 4.
+type {{.ServiceName}} struct{}
+
+func (*{{.ServiceName}}) ModulePath() string { return {{printf "%q" .ModulePath}} }
