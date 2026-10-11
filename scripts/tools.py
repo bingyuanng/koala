@@ -24,11 +24,16 @@ def check(require_buf=False):
     for name, version in CONTRACT['modules'].items():
         if actual.get(name) != version:
             errors.append(f'{name}: expected {version}, got {actual.get(name)}')
-    plugins = (ROOT / 'tools/buf.gen.yaml').read_text()
-    actual_plugins = [line.strip().removeprefix('- remote: ') for line in plugins.splitlines() if line.strip().startswith('- remote: ')]
     expected = [f'{name}:{version}' for name, version in CONTRACT['plugins'].items()]
-    if sorted(actual_plugins) != sorted(expected):
-        errors.append('remote plugin configuration differs from tools/versions.json')
+    for path in ('tools/buf.gen.yaml', 'examples/users/buf.gen.yaml',
+                 'internal/scaffold/templates/project/buf.gen.yaml'):
+        plugins = (ROOT / path).read_text()
+        actual_plugins = [line.strip().removeprefix('- remote: ') for line in plugins.splitlines() if line.strip().startswith('- remote: ')]
+        if sorted(actual_plugins) != sorted(expected):
+            errors.append(f'{path}: remote plugins differ from tools/versions.json')
+    for name in ('buf.yaml', 'buf.lock', 'buf.gen.yaml'):
+        if (ROOT / 'examples/users' / name).read_bytes() != (ROOT / 'internal/scaffold/templates/project' / name).read_bytes():
+            errors.append(f'{name}: project template differs from the verified fixture')
     gateway = CONTRACT['modules']['github.com/grpc-ecosystem/grpc-gateway/v2']
     for name in ('gateway', 'openapiv2'):
         if CONTRACT['plugins'][f'buf.build/grpc-ecosystem/{name}'] != gateway:

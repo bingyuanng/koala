@@ -1,0 +1,8 @@
+# Provisional generation outline. Phase 4 finalizes and validates this schema.
+version: v1
+proto_root: proto
+service_packages: ./internal/service/...
+dependency_type: {{.ModulePath}}/internal/deps.Dependencies
+registry:
+  package: bootstrap
+  output: internal/bootstrap/services_gen.go

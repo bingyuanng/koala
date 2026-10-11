@@ -1,6 +1,7 @@
 package scaffold
 
 import (
+	"encoding/json"
 	"go/parser"
 	"go/token"
 	"os"
@@ -10,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"github.com/bingyuanng/koala/config"
 )
 
 func TestEmbeddedTemplates(t *testing.T) {
@@ -26,6 +29,9 @@ func TestEmbeddedTemplates(t *testing.T) {
 		joined := ""
 		foundDotfile := false
 		for _, f := range files {
+			if f.Ownership != "application" && !(strings.HasPrefix(f.Path, "gen/") && f.Ownership == "generated") {
+				t.Fatalf("incorrect ownership for %s: %s", f.Path, f.Ownership)
+			}
 			joined += f.Content
 			if f.Path == ".gitignore" {
 				foundDotfile = true
@@ -45,7 +51,7 @@ func TestEmbeddedTemplates(t *testing.T) {
 		if kind == "project" && (!foundDotfile || !strings.Contains(joined, data.ProjectName) || !strings.Contains(joined, data.FrameworkVersion)) {
 			t.Fatal("project data or dotfile lost")
 		}
-		if kind == "service" && (files[0].Path != "Accounts/service.go" || !strings.Contains(joined, "type Accounts struct")) {
+		if kind == "service" && (!strings.Contains(joined, "UnimplementedAccountsServer") || !strings.Contains(joined, "//koala:service accounts.v1.Accounts") || !strings.Contains(joined, data.ModulePath+"/gen/go/accounts/v1")) {
 			t.Fatal("service mapping lost")
 		}
 	}
@@ -125,9 +131,47 @@ func TestRenderedProjectBuilds(t *testing.T) {
 	if output, err := edit.CombinedOutput(); err != nil {
 		t.Fatalf("project module: %v, %s", err, output)
 	}
-	build := exec.Command("go", "build", "-mod=readonly", ".")
+	build := exec.Command("go", "build", "-mod=readonly", "./...")
 	build.Dir = project
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("rendered project build: %v, %s", err, output)
+	}
+}
+
+func TestProjectLayoutAndDefaults(t *testing.T) {
+	data := Data{ModulePath: "example.com/app", ProjectName: `quoted "name"`, ServiceName: "UserService", FrameworkVersion: "v0.1.0"}
+	files, err := Render("project", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := make(map[string]File)
+	for _, file := range files {
+		paths[file.Path] = file
+	}
+	for _, name := range []string{"cmd/server/main.go", "internal/deps/deps.go", "internal/bootstrap/doc.go", "gen/go/.gitkeep", "gen/openapi/.gitkeep", "buf.yaml", "buf.lock", "buf.gen.yaml", "koala.yaml", "config.dev.json"} {
+		if _, ok := paths[name]; !ok {
+			t.Errorf("missing project path %s", name)
+		}
+	}
+	var cfg config.Config
+	if err := json.Unmarshal([]byte(paths["config.dev.json"].Content), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	expected := config.DefaultConfig()
+	expected.App.Name = data.ProjectName
+	if !reflect.DeepEqual(cfg, expected) {
+		t.Fatalf("template defaults = %#v, want %#v", cfg, expected)
+	}
+	service, err := Render("service", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range service {
+		if file.Ownership != "application" {
+			t.Fatalf("service source is not application-owned: %s", file.Path)
+		}
+	}
+	if len(service) != 2 || service[0].Path != "internal/service/user/service.go" || service[1].Path != "proto/user/v1/user.proto" {
+		t.Fatalf("service layout = %v", service)
 	}
 }

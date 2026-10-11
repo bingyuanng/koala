@@ -21,3 +21,9 @@ jobs:
         run: go build ./...
       - name: Test
         run: go test ./...
+      - name: Install pinned Buf
+        run: python3 scripts/tools.py install
+      - name: Check protobuf lint and deterministic generation
+        run: python3 scripts/check-generation.py
+      - name: Check example concurrency
+        run: go test -race ./examples/users/...

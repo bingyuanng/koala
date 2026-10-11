@@ -4,6 +4,7 @@ package scaffold
 import (
 	"bytes"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"go/format"
 	"io/fs"
@@ -22,11 +23,14 @@ type Data struct {
 	ProjectName      string
 	ServiceName      string
 	FrameworkVersion string
+	// ServiceDirectory is derived from ServiceName by Render.
+	ServiceDirectory string
 }
 
 type File struct {
-	Path    string `json:"path"`
-	Content string `json:"content"`
+	Path      string `json:"path"`
+	Content   string `json:"content"`
+	Ownership string `json:"ownership"`
 }
 
 func Render(kind string, data Data) ([]File, error) {
@@ -49,6 +53,10 @@ func Render(kind string, data Data) ([]File, error) {
 	}
 	if !regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?$`).MatchString(data.FrameworkVersion) {
 		return nil, fmt.Errorf("FrameworkVersion must be an explicit release version")
+	}
+	data.ServiceDirectory = strings.ToLower(strings.TrimSuffix(data.ServiceName, "Service"))
+	if data.ServiceDirectory == "" {
+		return nil, fmt.Errorf("ServiceName must include a domain name")
 	}
 	root, err := fs.Sub(assets, "templates/"+kind)
 	if err != nil {
@@ -101,7 +109,11 @@ func renderFS(root fs.FS, data any) ([]File, error) {
 			}
 			content = string(formatted)
 		}
-		files = append(files, File{Path: target, Content: content})
+		ownership := "application"
+		if strings.HasPrefix(target, "gen/") {
+			ownership = "generated"
+		}
+		files = append(files, File{Path: target, Content: content, Ownership: ownership})
 		return nil
 	})
 	if err != nil {
@@ -116,7 +128,10 @@ func safePath(name string) bool {
 }
 
 func execute(name, source string, data any) (string, error) {
-	t, err := template.New(name).Option("missingkey=error").Parse(source)
+	t, err := template.New(name).Funcs(template.FuncMap{"json": func(value any) (string, error) {
+		encoded, err := json.Marshal(value)
+		return string(encoded), err
+	}}).Option("missingkey=error").Parse(source)
 	if err != nil {
 		return "", fmt.Errorf("%s: parse template: %w", name, err)
 	}

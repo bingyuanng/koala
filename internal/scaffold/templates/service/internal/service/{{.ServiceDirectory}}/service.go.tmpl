@@ -1,0 +1,20 @@
+// Created from Koala {{.FrameworkVersion}}.
+// This file belongs to the application. Generation must never overwrite it.
+package service
+
+import (
+ servicev1 "{{.ModulePath}}/gen/go/{{.ServiceDirectory}}/v1"
+ "{{.ModulePath}}/internal/deps"
+)
+
+// {{.ServiceName}} inherits Unimplemented until application methods are added.
+type {{.ServiceName}} struct {
+ servicev1.Unimplemented{{.ServiceName}}Server
+}
+
+var _ servicev1.{{.ServiceName}}Server = (*{{.ServiceName}})(nil)
+
+//koala:service {{.ServiceDirectory}}.v1.{{.ServiceName}}
+func New(d *deps.Dependencies) (*{{.ServiceName}}, error) {
+ return &{{.ServiceName}}{}, nil
+}

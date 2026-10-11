@@ -13,5 +13,5 @@ while IFS= read -r -d '' file; do
     printf 'Unformatted Go file: %s\n%s\n' "$file" "$diff" >&2
     failed=1
   fi
-done < <(git ls-files -z -- '*.go')
+done < <(git ls-files --cached --others --exclude-standard --deduplicate -z -- '*.go')
 exit "$failed"
