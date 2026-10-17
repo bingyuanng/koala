@@ -25,5 +25,13 @@ jobs:
         run: python3 scripts/tools.py install
       - name: Check protobuf lint and deterministic generation
         run: python3 scripts/check-generation.py
-      - name: Check example concurrency
-        run: go test -race ./examples/users/...
+      - name: Vet
+        run: go vet ./...
+      - name: Check runtime and example concurrency
+        run: go test -race ./...
+      - name: Install pinned local generators for consumer acceptance
+        run: python3 scripts/tools.py install-plugins
+      - name: Check complete consumer CLI workflow
+        run: python3 scripts/check-workflow.py --local-plugins .tools/plugins
+      - name: Build release targets
+        run: python3 scripts/build-release.py --version v0.0.0-ci

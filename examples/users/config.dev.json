@@ -1,0 +1,48 @@
+{
+  "app": {
+    "name": "users",
+    "version": "dev",
+    "environment": "development"
+  },
+  "server": {
+    "http": {
+      "enabled": true,
+      "port": 8080,
+      "host": "127.0.0.1",
+      "write_timeout": "0s",
+      "max_body_bytes": 4194304,
+      "allowed_origins": [],
+      "docs": true
+    },
+    "grpc": {
+      "port": 9090,
+      "host": "127.0.0.1",
+      "cert_file": "",
+      "key_file": "",
+      "ca_file": "",
+      "server_name": ""
+    },
+    "shutdown_timeout": "15s"
+  },
+  "requests": {
+    "default_timeout": "5s",
+    "method_timeouts": {}
+  },
+  "logging": {
+    "level": "info"
+  },
+  "telemetry": {
+    "traces": {
+      "enabled": true,
+      "exporter": "stdout",
+      "sample_ratio": 1,
+      "endpoint": "",
+      "insecure": false
+    },
+    "metrics": {
+      "enabled": false,
+      "endpoint": "",
+      "insecure": false
+    }
+  }
+}

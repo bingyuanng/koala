@@ -18,6 +18,7 @@ type Service struct {
 
 var _ userv1.UserServiceServer = (*Service)(nil)
 
+//koala:service user.v1.UserService
 func New(d *deps.Dependencies) (*Service, error) {
 	if d == nil || d.Users == nil {
 		return nil, fmt.Errorf("user service requires a users repository")

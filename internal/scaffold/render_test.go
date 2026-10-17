@@ -131,6 +131,19 @@ func TestRenderedProjectBuilds(t *testing.T) {
 	if output, err := edit.CombinedOutput(); err != nil {
 		t.Fatalf("project module: %v, %s", err, output)
 	}
+	checksums, err := os.ReadFile(filepath.Join(root, "go.sum"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(project, "go.sum"), checksums, 0600); err != nil {
+		t.Fatal(err)
+	}
+	resolve := exec.Command("go", "build", "-mod=mod", "./...")
+	resolve.Dir = project
+	resolve.Env = append(os.Environ(), "GOPROXY=off")
+	if output, err := resolve.CombinedOutput(); err != nil {
+		t.Fatalf("rendered dependency resolution: %v, %s", err, output)
+	}
 	build := exec.Command("go", "build", "-mod=readonly", "./...")
 	build.Dir = project
 	if output, err := build.CombinedOutput(); err != nil {

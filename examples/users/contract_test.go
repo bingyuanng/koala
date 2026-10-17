@@ -70,8 +70,11 @@ func TestHTTPAndOpenAPIContracts(t *testing.T) {
 	if err := json.Unmarshal(data, &document); err != nil {
 		t.Fatal(err)
 	}
-	if document.Swagger != "2.0" || len(document.Paths) != 2 {
+	if document.Swagger != "2.0" || len(document.Paths) != 3 {
 		t.Fatal("expected merged OpenAPI 2.0 paths")
+	}
+	if len(document.Paths["/v1/order/{id}"]["get"]) == 0 {
+		t.Fatal("merged spec is missing OrderService")
 	}
 	for _, name := range []string{"v1User", "v1CreateUserRequest", "v1CreateUserResponse", "v1GetUserResponse"} {
 		if len(document.Definitions[name]) == 0 {

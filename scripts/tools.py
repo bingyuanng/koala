@@ -58,7 +58,20 @@ if __name__ == '__main__':
         env = dict(os.environ, GOBIN=str(target))
         subprocess.run(['go', 'install', 'github.com/bufbuild/buf/cmd/buf@v' + CONTRACT['buf']], cwd=ROOT, env=env, check=True)
         check(True)
+    elif mode == 'install-plugins':
+        import os
+        target = ROOT / '.tools/plugins'
+        target.mkdir(parents=True, exist_ok=True)
+        packages = {
+            'google.golang.org/protobuf/cmd/protoc-gen-go': CONTRACT['plugins']['buf.build/protocolbuffers/go'],
+            'google.golang.org/grpc/cmd/protoc-gen-go-grpc': CONTRACT['plugins']['buf.build/grpc/go'],
+            'github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway': CONTRACT['plugins']['buf.build/grpc-ecosystem/gateway'],
+            'github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2': CONTRACT['plugins']['buf.build/grpc-ecosystem/openapiv2'],
+        }
+        for package, version in packages.items():
+            subprocess.run(['go', 'install', package + '@' + version], cwd=ROOT,
+                           env=dict(os.environ, GOBIN=str(target)), check=True)
     elif mode in ('check', 'check-tools'):
         check(mode == 'check-tools')
     else:
-        raise SystemExit('usage: python3 scripts/tools.py install|check|check-tools')
+        raise SystemExit('usage: python3 scripts/tools.py install|install-plugins|check|check-tools')

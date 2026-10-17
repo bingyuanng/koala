@@ -1,0 +1,29 @@
+name: Versioned release
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify production packages
+        run: |
+          go test ./...
+          go vet ./...
+      - name: Build CLI archives and checksums
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: python3 scripts/build-release.py --version "$RELEASE_VERSION"
+      - name: Publish the tagged runtime and matching CLI
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: gh release create "$RELEASE_VERSION" dist/* --verify-tag --generate-notes --title "Koala $RELEASE_VERSION"

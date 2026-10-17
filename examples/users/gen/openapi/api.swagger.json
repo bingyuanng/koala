@@ -1,10 +1,14 @@
 {
   "swagger": "2.0",
   "info": {
-    "title": "user/v1/user.proto",
+    "title": "order/v1/order.proto",
     "version": "version not set"
   },
   "tags": [
+    {
+      "name": "OrderService",
+      "description": "OrderService is an application-owned API contract."
+    },
     {
       "name": "UserService",
       "description": "UserService creates users and retrieves them by ID."
@@ -17,6 +21,37 @@
     "application/json"
   ],
   "paths": {
+    "/v1/order/{id}": {
+      "get": {
+        "summary": "Get retrieves a resource by ID. Replace this baseline operation as needed.",
+        "operationId": "OrderService_Get",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "OrderService"
+        ]
+      }
+    },
     "/v1/users": {
       "post": {
         "summary": "CreateUser stores a new user.",
@@ -135,6 +170,15 @@
         }
       },
       "description": "CreateUserResponse contains the created user."
+    },
+    "v1GetResponse": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "description": "GetResponse contains the resource identifier."
     },
     "v1GetUserResponse": {
       "type": "object",

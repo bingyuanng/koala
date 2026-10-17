@@ -1,13 +1,22 @@
 package main
 
 import (
- "fmt"
- "github.com/bingyuanng/koala/config"
-)
+ "context"
+ "log"
+ "os"
+ "os/signal"
+ "syscall"
 
-// This foundation template will gain runtime startup in Phase 3.
-func main() {
- cfg := config.DefaultConfig()
- cfg.App.Name = {{printf "%q" .ProjectName}}
- fmt.Println(cfg.App.Name, cfg.Server.HTTP.Port)
+ koala "github.com/bingyuanng/koala"
+ "github.com/bingyuanng/koala/config"
+ "{{.ModulePath}}/internal/bootstrap"
+ "{{.ModulePath}}/internal/deps"
+)
+func main(){
+ ctx,stop:=signal.NotifyContext(context.Background(),os.Interrupt,syscall.SIGTERM);defer stop()
+ cfg,err:=config.Load(config.Options[config.Config]{Defaults:func()config.Config{c:=config.DefaultConfig();c.App.Name={{printf "%q" .ProjectName}};return c},Validate:bootstrap.ValidateConfig})
+ if err!=nil{log.Fatal(err)}
+ app,err:=koala.New(cfg,koala.Options{OpenAPI:bootstrap.OpenAPI});if err!=nil{log.Fatal(err)}
+ if err=bootstrap.RegisterAll(app,&deps.Dependencies{});err!=nil{log.Fatal(err)}
+ if err=app.Run(ctx);err!=nil{log.Fatal(err)}
 }

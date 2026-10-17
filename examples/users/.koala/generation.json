@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "contracts": "4890aba1328f8c901f284281a34e1d1a17a84287692be486a89bdfd550a1eb78",
+  "input": "531d19d7f3175c80c61e8169ff83acf6c9f5a325aaf4e7602b5904a94f4451f4",
+  "outputs": {
+    ".koala/descriptors.bin": "8d7dbc1656467594f51e197580583ab8e5cb6d0b5e836ff6342e11100207bd1e",
+    "gen/go/order/v1/order.pb.go": "d6d42f13cfbd3efc3130ff922b6e89a82ea396568e4d7f89e2df127f2a579a1e",
+    "gen/go/order/v1/order.pb.gw.go": "5cd2768631491353cc98419ee42e7b8a1350e169182e13bb00c5960fabbccafc",
+    "gen/go/order/v1/order_grpc.pb.go": "309bc8964cb916f166743257c2c7b12e97ab0e7b20c3491d3ae05d396d5982ae",
+    "gen/go/user/v1/user.pb.go": "cbd846013a2bbcd4cd46584750a6e1ed4eef2ce8d2f2f99fc384ac13e54a143e",
+    "gen/go/user/v1/user.pb.gw.go": "dcae37f24e65e11470ba949efa3f8a53fcc23dbdfff0002c3c88834ea1cca6be",
+    "gen/go/user/v1/user_grpc.pb.go": "4824475686a495f2e7a9c5a173e0038fb1a30312933106f40e07a9f2769ae839",
+    "gen/openapi/api.swagger.json": "0547df8e2774306b575d9d07a088c93dd9a02eafd45d6bb92e50b194a142fd70",
+    "internal/bootstrap/services_gen.go": "5090a1996d8eb3a0e97c70dcb664e1b6df3bb06b89f7a6b9edb7890e9755d437"
+  }
+}

@@ -1,9 +1,1 @@
-{
-  "app": {"name": {{json .ProjectName}}},
-  "server": {
-    "http": {"enabled": true, "port": 8080},
-    "grpc": {"port": 9090},
-    "shutdown_timeout": "15s"
-  },
-  "requests": {"default_timeout": "5s", "method_timeouts": null}
-}
+{{frameworkDefaults .ProjectName}}

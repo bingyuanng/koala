@@ -6,6 +6,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"github.com/bingyuanng/koala/config"
 	"go/format"
 	"io/fs"
 	"path"
@@ -128,7 +129,12 @@ func safePath(name string) bool {
 }
 
 func execute(name, source string, data any) (string, error) {
-	t, err := template.New(name).Funcs(template.FuncMap{"json": func(value any) (string, error) {
+	t, err := template.New(name).Funcs(template.FuncMap{"frameworkDefaults": func(name string) (string, error) {
+		c := config.DefaultConfig()
+		c.App.Name = name
+		b, e := json.MarshalIndent(c, "", "  ")
+		return string(b), e
+	}, "json": func(value any) (string, error) {
 		encoded, err := json.Marshal(value)
 		return string(encoded), err
 	}}).Option("missingkey=error").Parse(source)
