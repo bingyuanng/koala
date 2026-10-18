@@ -20,14 +20,14 @@ jobs:
       RELEASE_VERSION: ${{ inputs.version }}
       BUILD_TARGET: ${{ matrix.os }}/${{ matrix.arch }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
       - name: Build CLI archive
         run: go run ./scripts/build-release --version "$RELEASE_VERSION" --target "$BUILD_TARGET"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: cli-${{ matrix.os }}-${{ matrix.arch }}
           path: dist/*.tar.gz
@@ -37,7 +37,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: cli-*
           path: dist
@@ -45,7 +45,7 @@ jobs:
       - name: Generate combined checksums
         working-directory: dist
         run: sha256sum *.tar.gz > SHA256SUMS
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-archives
           path: dist/*
