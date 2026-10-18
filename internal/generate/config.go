@@ -65,6 +65,3 @@ func splitType(s string) (string, string, error) {
 	}
 	return s[:i], s[i+1:], nil
 }
-
-// ApplicationImportPath resolves a project inside a standalone module or monorepo.
-func ApplicationImportPath(root string) (string, error) { return modulePath(root) }

@@ -135,9 +135,6 @@ func execute(name, source string, data any) (string, error) {
 		c.App.Name = name
 		b, e := json.MarshalIndent(c, "", "  ")
 		return string(b), e
-	}, "json": func(value any) (string, error) {
-		encoded, err := json.Marshal(value)
-		return string(encoded), err
 	}}).Option("missingkey=error").Parse(source)
 	if err != nil {
 		return "", fmt.Errorf("%s: parse template: %w", name, err)

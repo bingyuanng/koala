@@ -250,7 +250,7 @@ func Run(ctx context.Context, root string, o Options) error {
 	}
 	openAPIImport := ""
 	if _, ok := outputs["gen/openapi/api.swagger.json"]; ok {
-		module, err := modulePath(root)
+		module, err := ApplicationImportPath(root)
 		if err != nil {
 			return err
 		}
@@ -300,7 +300,7 @@ func servicesFrom(root string, cfg Config, b []byte) ([]service, error) {
 	for _, n := range cfg.Exclude {
 		excluded[n] = true
 	}
-	module, e := modulePath(root)
+	module, e := ApplicationImportPath(root)
 	if e != nil {
 		return nil, e
 	}
@@ -339,7 +339,9 @@ func servicesFrom(root string, cfg Config, b []byte) ([]service, error) {
 	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
 	return result, nil
 }
-func modulePath(root string) (string, error) {
+
+// ApplicationImportPath resolves a project inside a standalone module or monorepo.
+func ApplicationImportPath(root string) (string, error) {
 	current := root
 	for {
 		b, e := os.ReadFile(filepath.Join(current, "go.mod"))
@@ -599,7 +601,7 @@ func protoSources(root string, c Config) ([]string, error) {
 }
 
 func contractHash(root string, c Config) (string, error) {
-	module, e := modulePath(root)
+	module, e := ApplicationImportPath(root)
 	if e != nil {
 		return "", e
 	}

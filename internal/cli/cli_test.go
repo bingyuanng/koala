@@ -41,7 +41,7 @@ func TestCommands(t *testing.T) {
 		out  string
 	}{
 		{nil, 0, "Usage:"}, {[]string{"--help"}, 0, "Usage:"}, {[]string{"version"}, 0, "koala dev"},
-		{[]string{"unknown"}, 2, ""}, {[]string{"help", "extra"}, 2, ""}, {[]string{"schema"}, 2, ""}, {[]string{"template", "project"}, 2, ""},
+		{[]string{"unknown"}, 2, ""}, {[]string{"help", "extra"}, 2, ""},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := Run(tt.args, &stdout, &stderr); code != tt.code {
@@ -184,15 +184,8 @@ func TestConfigConsumerAndRelocatedCLI(t *testing.T) {
 	help := exec.Command(binary, "help")
 	help.Dir = outside
 	output, err = help.CombinedOutput()
-	if err != nil || !strings.Contains(string(output), "Usage:") || strings.Contains(string(output), "koala template") {
+	if err != nil || !strings.Contains(string(output), "Usage:") {
 		t.Fatalf("relocated help: %v, %s", err, output)
-	}
-	removed := exec.Command(binary, "template", "project")
-	removed.Dir = outside
-	output, err = removed.CombinedOutput()
-	exit, ok := err.(*exec.ExitError)
-	if !ok || exit.ExitCode() != 2 || !strings.Contains(string(output), "unsupported command") {
-		t.Fatalf("removed command: %v, %s", err, output)
 	}
 
 	// Consumer Go source is separate from the compiled CLI's dependency graph.

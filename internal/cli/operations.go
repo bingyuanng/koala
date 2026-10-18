@@ -145,7 +145,7 @@ func newCommand(args []string, out, errout io.Writer) error {
 		if e != nil {
 			return e
 		}
-		module, e := readModule(root)
+		module, e := generate.ApplicationImportPath(root)
 		if e != nil {
 			return e
 		}
@@ -249,8 +249,6 @@ func frameworkVersion() string {
 	}
 	return ""
 }
-func readModule(root string) (string, error) { return generate.ApplicationImportPath(root) }
-
 func writeFiles(root string, files []scaffold.File) error {
 	// Preflight all outputs, including existing symlink ancestors, before writing.
 	for _, file := range files {
