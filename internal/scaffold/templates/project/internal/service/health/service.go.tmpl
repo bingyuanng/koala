@@ -1,0 +1,44 @@
+// Created by Koala.
+// This file belongs to the application. Generation must never overwrite it.
+package health
+
+import (
+ "context"
+
+ "google.golang.org/grpc/codes"
+ "google.golang.org/grpc/status"
+
+ healthv1 "{{.ModulePath}}/gen/go/health/v1"
+ "{{.ModulePath}}/internal/deps"
+)
+
+// Service implements the sample health API. Add application checks here.
+type Service struct {
+ healthv1.UnimplementedHealthServiceServer
+ isReady func() bool
+}
+
+var _ healthv1.HealthServiceServer = (*Service)(nil)
+
+//koala:service health.v1.HealthService
+func New(d *deps.Dependencies) (*Service, error) {
+ return &Service{isReady: d.IsReady}, nil
+}
+
+func (s *Service) Health(ctx context.Context, request *healthv1.HealthRequest) (*healthv1.HealthResponse, error) {
+ if err := ctx.Err(); err != nil {
+  return nil, err
+ }
+ return &healthv1.HealthResponse{Status: "ok"}, nil
+}
+
+func (s *Service) Ready(ctx context.Context, request *healthv1.ReadyRequest) (*healthv1.ReadyResponse, error) {
+ if err := ctx.Err(); err != nil {
+  return nil, err
+ }
+ // Add application dependency checks here, such as database availability.
+ if s.isReady == nil || !s.isReady() {
+  return nil, status.Error(codes.Unavailable, "not ready")
+ }
+ return &healthv1.ReadyResponse{Status: "ok"}, nil
+}

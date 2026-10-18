@@ -1,0 +1,5 @@
+.env
+/bin/
+
+config.*.json
+!config.dev.json

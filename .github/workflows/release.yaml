@@ -1,0 +1,63 @@
+name: Versioned release
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version, e.g. v0.1.0 or v0.2.0-rc.1'
+        required: true
+        type: string
+permissions:
+  contents: write
+concurrency:
+  group: versioned-release
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate new release version
+        shell: bash
+        run: |
+          if [[ ! "$RELEASE_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?$ ]]; then
+            echo 'Version must be explicit, e.g. v0.1.0 or v0.2.0-rc.1' >&2
+            exit 1
+          fi
+          git check-ref-format "refs/tags/$RELEASE_VERSION"
+          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_VERSION"; then
+            echo "Tag $RELEASE_VERSION already exists; choose a new version" >&2
+            exit 1
+          else
+            status=$?
+            if [[ "$status" -ne 2 ]]; then
+              exit "$status"
+            fi
+          fi
+      - uses: jdx/mise-action@v4
+        with:
+          install: false
+          cache: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify production packages
+        run: |
+          go test ./...
+          go vet ./...
+      - name: Build CLI archives and checksums
+        run: python3 scripts/build-release.py --version "$RELEASE_VERSION"
+      - name: Create tag and publish matching runtime and CLI
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          release_flags=()
+          if [[ "$RELEASE_VERSION" == *-* ]]; then
+            release_flags+=(--prerelease)
+          fi
+          gh release create "$RELEASE_VERSION" dist/* \
+            --target "$GITHUB_SHA" --generate-notes \
+            --title "Koala $RELEASE_VERSION" "${release_flags[@]}"

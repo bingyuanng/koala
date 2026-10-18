@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package user.v1;
+
+import "buf/validate/validate.proto";
+import "google/api/annotations.proto";
+
+option go_package = "github.com/bingyuanng/koala/internal/testdata/runtime/gen/go/user/v1;userv1";
+
+// UserService creates users and retrieves them by ID.
+service UserService {
+  // CreateUser stores a new user.
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse) {
+    option (google.api.http) = {
+      post: "/v1/users"
+      body: "*"
+    };
+  }
+  // GetUser retrieves one user by ID.
+  rpc GetUser(GetUserRequest) returns (GetUserResponse) {
+    option (google.api.http) = {get: "/v1/users/{id}"};
+  }
+}
+
+// User is the public representation of a stored user.
+message User {
+  // ID is assigned by the repository.
+  string id = 1;
+  // Display name supplied when the user was created.
+  string name = 2;
+  // Email address supplied when the user was created.
+  string email = 3;
+}
+
+// CreateUserRequest supplies the new user's details.
+message CreateUserRequest {
+  // Name must contain between 1 and 100 characters.
+  string name = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+  // Email must be a valid email address.
+  string email = 2 [(buf.validate.field).string.email = true];
+}
+
+// CreateUserResponse contains the created user.
+message CreateUserResponse {
+  User user = 1;
+}
+
+// GetUserRequest identifies an existing user.
+message GetUserRequest {
+  // ID must be a nonempty repository identifier.
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+// GetUserResponse contains the requested user.
+message GetUserResponse {
+  User user = 1;
+}

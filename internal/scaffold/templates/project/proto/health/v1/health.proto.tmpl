@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package health.v1;
+
+import "google/api/annotations.proto";
+
+option go_package = "{{.ModulePath}}/gen/go/health/v1;healthv1";
+
+// HealthService is an application-owned example exposed over gRPC and HTTP.
+service HealthService {
+  // Health reports basic application health.
+  rpc Health(HealthRequest) returns (HealthResponse) {
+    option (google.api.http) = {get: "/healthz"};
+  }
+
+  // Ready reports whether the application is ready to accept traffic.
+  rpc Ready(ReadyRequest) returns (ReadyResponse) {
+    option (google.api.http) = {get: "/readyz"};
+  }
+}
+
+// HealthRequest requests the application's health status.
+message HealthRequest {}
+
+// HealthResponse contains the application's health status.
+message HealthResponse {
+  string status = 1;
+}
+
+// ReadyRequest requests the application's readiness status.
+message ReadyRequest {}
+
+// ReadyResponse contains the application's readiness status.
+message ReadyResponse {
+  string status = 1;
+}

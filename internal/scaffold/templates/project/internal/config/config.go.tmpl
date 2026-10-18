@@ -1,0 +1,78 @@
+// Package config defines application settings and loading policy.
+package config
+
+import (
+	"errors"
+	"os"
+
+	koala "github.com/bingyuanng/koala"
+	koalaconfig "github.com/bingyuanng/koala/config"
+	"github.com/bingyuanng/koala/observability"
+)
+
+// Config is the complete application configuration. Add custom sections here.
+type Config struct {
+	App       observability.ServiceConfig   `json:"app"`
+	Server    koala.ServerConfig            `json:"server"`
+	Requests  koala.RequestConfig           `json:"requests"`
+	Logging   observability.LoggerConfig    `json:"logging"`
+	Telemetry observability.TelemetryConfig `json:"telemetry"`
+}
+
+// DefaultConfig returns fresh application defaults.
+// Callers can decode JSON into it before validating the resulting values.
+func DefaultConfig() Config {
+	return Config{
+		App: observability.ServiceConfig{
+			Name:        {{printf "%q" .ProjectName}},
+			Version:     "dev",
+			Environment: "development",
+		},
+		Server: koala.ServerConfig{
+			HTTP: koala.HTTPConfig{
+				Enabled:        true,
+				Port:           8080,
+				Host:           "127.0.0.1",
+				WriteTimeout:   "0s",
+				MaxBodyBytes:   4 << 20,
+				AllowedOrigins: []string{},
+				Docs:           true,
+			},
+			GRPC:            koala.GRPCConfig{Port: 9090, Host: "127.0.0.1"},
+			ShutdownTimeout: "15s",
+		},
+		Requests: koala.RequestConfig{DefaultTimeout: "5s", MethodTimeouts: map[string]string{}},
+		Logging:  observability.LoggerConfig{Level: "info"},
+		Telemetry: observability.TelemetryConfig{
+			Traces: observability.TraceConfig{Enabled: false, Exporter: "stdout", SampleRatio: 1},
+		},
+	}
+}
+
+// Validate checks component settings. Add application-specific checks here.
+func Validate(c Config) error {
+	return errors.Join(
+		koala.ValidateServerConfig(c.Server, c.Requests),
+		observability.ValidateLogger(c.Logging),
+		observability.ValidateTelemetry(c.Telemetry),
+	)
+}
+
+// Load reads config.dev.json in dev, then applies KOALA_ environment overrides.
+// All other environments use defaults and KOALA_ environment variables only.
+func Load() (Config, error) {
+	environment := os.Getenv("KOALA_ENV")
+	if environment == "" {
+		environment = "dev"
+	}
+	options := koalaconfig.Options[Config]{
+		Defaults: DefaultConfig,
+		Prefix:   "KOALA_",
+		Env:      os.Environ(),
+		Validate: Validate,
+	}
+	if environment == "dev" {
+		return koalaconfig.LoadFile("config.dev.json", options)
+	}
+	return koalaconfig.LoadEnv(options)
+}

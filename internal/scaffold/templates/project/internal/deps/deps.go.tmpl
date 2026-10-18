@@ -1,0 +1,18 @@
+// Package deps holds application resources constructed explicitly in main.
+package deps
+
+import (
+ "log/slog"
+
+ "{{.ModulePath}}/internal/config"
+ "github.com/bingyuanng/koala/observability"
+)
+
+// Dependencies is shared by service factories. Add application resources here.
+type Dependencies struct {
+ Config config.Config
+ Logger *slog.Logger
+ Telemetry *observability.Providers
+ // IsReady is explicitly supplied by main to expose lifecycle readiness.
+ IsReady func() bool
+}

@@ -1,0 +1,66 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+
+	koala "github.com/bingyuanng/koala"
+	"github.com/bingyuanng/koala/observability"
+	"{{.ModulePath}}/internal/bootstrap"
+	appconfig "{{.ModulePath}}/internal/config"
+	"{{.ModulePath}}/internal/deps"
+)
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := run(ctx); err != nil {
+		log.Print(err)
+		os.Exit(1)
+	}
+}
+
+func run(ctx context.Context) (err error) {
+	cfg, err := appconfig.Load()
+	if err != nil {
+		return err
+	}
+
+	if err := bootstrap.ValidateConfig(cfg.Server, cfg.Requests); err != nil {
+		return err
+	}
+
+	logger, err := observability.NewLogger(cfg.Logging, os.Stdout)
+	if err != nil {
+		return err
+	}
+
+	logger = logger.With("app", cfg.App.Name, "version", cfg.App.Version, "environment", cfg.App.Environment)
+
+	telemetry, err := observability.NewTelemetry(ctx, cfg.Telemetry, cfg.App, os.Stdout)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		err = errors.Join(err, koala.Close(cfg.Server.ShutdownTimeout, telemetry.Shutdown))
+	}()
+
+	app, err := koala.New(cfg.Server, koala.Options{
+		Requests:  cfg.Requests,
+		Logger:    logger,
+		Telemetry: telemetry,
+		OpenAPI:   bootstrap.OpenAPI,
+	})
+	if err != nil {
+		return err
+	}
+	dependencies := &deps.Dependencies{Config: cfg, Logger: logger, Telemetry: telemetry, IsReady: app.IsReady}
+	if err := bootstrap.RegisterAll(app, dependencies); err != nil {
+		return err
+	}
+	return app.Run(ctx)
+}

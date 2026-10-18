@@ -1,0 +1,70 @@
+# {{.ProjectName}}
+
+## Local development
+
+Run these commands from the project root:
+
+```sh
+mise trust
+mise install
+koala gen
+koala start
+```
+
+With `KOALA_ENV` unset or empty, the app defaults to `dev`. It loads defaults from
+`internal/config/config.go`, then `config.dev.json`, then `KOALA_` environment
+overrides. The development JSON file must exist.
+
+## Environment setup
+
+Set `KOALA_ENV` in your shell or deployment environment before starting the app.
+It selects the configuration sources:
+
+| `KOALA_ENV` | Sources, in precedence order |
+| --- | --- |
+| Unset, empty, or `dev` | Defaults → `config.dev.json` → environment overrides |
+| `stg`, `prd`, or any other value | Defaults → environment overrides |
+
+Names are case-sensitive. Only the exact value `dev` reads a file. Other values,
+including `staging`, `production`, and `test`, skip all JSON configuration files.
+Files such as `config.stg.json` and `config.prd.json` are not loaded automatically.
+
+`KOALA_ENV` is read before selecting a file, so it belongs in the process
+environment. A top-level `env` key in JSON is not supported.
+
+`KOALA_APP__ENVIRONMENT` sets the separate `app.environment` label used in logs and
+telemetry. It does not select configuration sources. Set it explicitly for staging
+and production; its default is `development`, even when `KOALA_ENV` is `stg` or
+`prd`.
+
+For local development:
+
+```sh
+KOALA_ENV=dev KOALA_APP__ENVIRONMENT=development koala start
+```
+
+Build the application after generation for staging or production:
+
+```sh
+go build -o bin/server ./cmd/server
+```
+
+For staging:
+
+```sh
+KOALA_ENV=stg KOALA_APP__ENVIRONMENT=staging ./bin/server
+```
+
+For production:
+
+```sh
+KOALA_ENV=prd KOALA_APP__ENVIRONMENT=production ./bin/server
+```
+
+Compiled applications do not require mise or the Koala CLI. Supply configuration
+overrides through your deployment's environment settings. Nested JSON paths use
+double underscores, such as `KOALA_SERVER__HTTP__PORT=8080` for `server.http.port`.
+
+Add application-specific configuration fields, defaults, and validation in
+`internal/config/config.go`. Services receive the complete resolved configuration
+through `Dependencies.Config`.
