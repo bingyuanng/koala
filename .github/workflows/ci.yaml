@@ -78,24 +78,9 @@ jobs:
       - name: Expose pinned local generators for consumer acceptance
         run: mise run local-plugins
       - name: Check complete consumer CLI workflow
-<<<<<<< HEAD
         run: go run ./scripts/check-workflow --local-plugins .tools/plugins
 
-  release-build:
-    name: Release build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-      - name: Build release targets
-        run: go run ./scripts/build-release --version v0.0.0-ci
-=======
-        run: python3 scripts/check-workflow.py --local-plugins .tools/plugins
   build:
     uses: ./.github/workflows/build.yaml
     with:
       version: v0.0.0-ci
->>>>>>> c53b9d1 (chore: split build workflow)

@@ -52,10 +52,6 @@ jobs:
         run: |
           go test ./...
           go vet ./...
-<<<<<<< HEAD
-      - name: Build CLI archives and checksums
-        run: go run ./scripts/build-release --version "$RELEASE_VERSION"
-=======
   build:
     needs: prepare
     uses: ./.github/workflows/build.yaml
@@ -77,7 +73,6 @@ jobs:
       - name: Verify archive checksums
         working-directory: dist
         run: sha256sum --check SHA256SUMS
->>>>>>> c53b9d1 (chore: split build workflow)
       - name: Create tag and publish matching runtime and CLI
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

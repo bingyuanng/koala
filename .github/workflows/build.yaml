@@ -26,7 +26,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Build CLI archive
-        run: python3 scripts/build-release.py --version "$RELEASE_VERSION" --target "$BUILD_TARGET"
+        run: go run ./scripts/build-release --version "$RELEASE_VERSION" --target "$BUILD_TARGET"
       - uses: actions/upload-artifact@v4
         with:
           name: cli-${{ matrix.os }}-${{ matrix.arch }}
