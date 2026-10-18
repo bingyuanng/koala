@@ -8,10 +8,10 @@ permissions:
   contents: read
 jobs:
   check:
+    name: Checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: jdx/mise-action@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -22,15 +22,60 @@ jobs:
         run: go build ./...
       - name: Test
         run: go test ./...
-      - name: Check protobuf lint and deterministic generation
-        run: python3 scripts/check-generation.py
       - name: Vet
         run: go vet ./...
+
+  race:
+    name: Race
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
       - name: Check runtime concurrency
         run: go test -race ./...
+
+  generation:
+    name: Generation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v4
+        with:
+          install_args: buf
+          add_shims_to_path: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Check protobuf lint and deterministic generation
+        run: go run ./scripts/check-generation
+
+  acceptance:
+    name: Acceptance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
       - name: Expose pinned local generators for consumer acceptance
         run: mise run local-plugins
       - name: Check complete consumer CLI workflow
-        run: python3 scripts/check-workflow.py --local-plugins .tools/plugins
+        run: go run ./scripts/check-workflow --local-plugins .tools/plugins
+
+  release-build:
+    name: Release build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
       - name: Build release targets
-        run: python3 scripts/build-release.py --version v0.0.0-ci
+        run: go run ./scripts/build-release --version v0.0.0-ci

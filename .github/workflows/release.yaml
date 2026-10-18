@@ -53,7 +53,7 @@ jobs:
           go test ./...
           go vet ./...
       - name: Build CLI archives and checksums
-        run: python3 scripts/build-release.py --version "$RELEASE_VERSION"
+        run: go run ./scripts/build-release --version "$RELEASE_VERSION"
       - name: Create tag and publish matching runtime and CLI
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
