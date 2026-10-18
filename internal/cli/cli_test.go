@@ -196,16 +196,20 @@ func TestConfigConsumerAndRelocatedCLI(t *testing.T) {
 	}
 
 	// Consumer Go source is separate from the compiled CLI's dependency graph.
-	deps := exec.Command("go", "list", "-deps", "./cmd/koala")
+	deps := exec.Command("go", "list", "-f", `{{.ImportPath}} {{join .Deps " "}}`, "./cmd/koala", "./config")
 	deps.Dir = root
 	graph, err := deps.Output()
-	if err != nil || strings.Contains(string(graph), "example.com/koala-config-consumer") {
-		t.Fatalf("application linked into CLI: %v", err)
+	if err != nil {
+		t.Fatalf("dependency graphs: %v", err)
 	}
-	deps = exec.Command("go", "list", "-deps", "./config")
-	deps.Dir = root
-	graph, err = deps.Output()
-	if err != nil || strings.Contains(string(graph), "/internal/cli") {
-		t.Fatalf("runtime depends on CLI: %v", err)
+	graphs := strings.Split(strings.TrimSpace(string(graph)), "\n")
+	if len(graphs) != 2 || !strings.HasPrefix(graphs[0], "github.com/bingyuanng/koala/cmd/koala ") || !strings.HasPrefix(graphs[1], "github.com/bingyuanng/koala/config ") {
+		t.Fatalf("unexpected dependency graphs: %s", graph)
+	}
+	if strings.Contains(graphs[0], "example.com/koala-config-consumer") {
+		t.Fatal("application linked into CLI")
+	}
+	if strings.Contains(graphs[1], "/internal/cli") {
+		t.Fatal("runtime depends on CLI")
 	}
 }

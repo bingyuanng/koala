@@ -87,17 +87,12 @@ func TestRenderErrorsAreAtomic(t *testing.T) {
 }
 
 func TestEmbeddedAssetsOutsideRepository(t *testing.T) {
-	root, err := filepath.Abs("../..")
+	t.Parallel()
+	binary, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
 	outside := t.TempDir()
-	binary := filepath.Join(outside, "scaffold.test")
-	build := exec.Command("go", "test", "-c", "-o", binary, "./internal/scaffold")
-	build.Dir = root
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build asset test: %v, %s", err, output)
-	}
 	check := exec.Command(binary, "-test.run=^TestEmbeddedTemplates$")
 	check.Dir = outside
 	if output, err := check.CombinedOutput(); err != nil {
@@ -106,6 +101,7 @@ func TestEmbeddedAssetsOutsideRepository(t *testing.T) {
 }
 
 func TestRenderedProjectBuilds(t *testing.T) {
+	t.Parallel()
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -198,13 +194,15 @@ func TestOwnedSourcePolicyAndCustomSettings(t *testing.T) {
 	if err = os.WriteFile(filepath.Join(project, "go.sum"), checksums, 0600); err != nil {
 		t.Fatal(err)
 	}
-	resolve := exec.Command("go", "build", "-mod=mod", "./...")
+	// Resolve the application graph without compiling it twice. The test below
+	// compiles every rendered package and verifies the extended configuration.
+	resolve := exec.Command("go", "list", "-mod=mod", "-deps", "./...")
 	resolve.Dir = project
 	resolve.Env = append(os.Environ(), "GOPROXY=off")
 	if output, err := resolve.CombinedOutput(); err != nil {
 		t.Fatalf("rendered dependency resolution: %v, %s", err, output)
 	}
-	verifyConfig := exec.Command("go", "test", "-mod=readonly", "./internal/config")
+	verifyConfig := exec.Command("go", "test", "-mod=readonly", "./...")
 	verifyConfig.Dir = project
 	verifyConfig.Env = []string{}
 	for _, entry := range os.Environ() {
@@ -213,12 +211,7 @@ func TestOwnedSourcePolicyAndCustomSettings(t *testing.T) {
 		}
 	}
 	if output, err := verifyConfig.CombinedOutput(); err != nil {
-		t.Fatalf("rendered configuration: %v, %s", err, output)
-	}
-	build := exec.Command("go", "build", "-mod=readonly", "./...")
-	build.Dir = project
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("rendered project build: %v, %s", err, output)
+		t.Fatalf("rendered project tests: %v, %s", err, output)
 	}
 }
 
