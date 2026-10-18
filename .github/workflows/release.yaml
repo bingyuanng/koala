@@ -7,7 +7,7 @@ on:
         required: true
         type: string
 permissions:
-  contents: write
+  contents: read
 concurrency:
   group: versioned-release
   cancel-in-progress: false
@@ -16,13 +16,13 @@ jobs:
     uses: ./.github/workflows/security.yaml
     permissions:
       contents: read
-  release:
+  prepare:
     needs: vulnerabilities
     runs-on: ubuntu-latest
     env:
       RELEASE_VERSION: ${{ inputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Validate new release version
         shell: bash
         run: |
@@ -44,7 +44,7 @@ jobs:
         with:
           install: false
           cache: false
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -52,8 +52,27 @@ jobs:
         run: |
           go test ./...
           go vet ./...
-      - name: Build CLI archives and checksums
-        run: go run ./scripts/build-release --version "$RELEASE_VERSION"
+  build:
+    needs: prepare
+    uses: ./.github/workflows/build.yaml
+    with:
+      version: ${{ inputs.version }}
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-archives
+          path: dist
+      - name: Verify archive checksums
+        working-directory: dist
+        run: sha256sum --check SHA256SUMS
       - name: Create tag and publish matching runtime and CLI
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

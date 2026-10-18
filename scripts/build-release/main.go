@@ -20,12 +20,24 @@ func build() {
 	root := s.Root()
 	version := flag.String("version", "", "Explicit semantic release version")
 	output := flag.String("output", filepath.Join(root, "dist"), "Archive output directory")
+	selectedTarget := flag.String("target", "", "Build only linux/amd64, linux/arm64, darwin/amd64, or darwin/arm64; default builds all targets")
 	flag.Parse()
 	s.Check(regexp.MustCompile(`^v\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$`).MatchString(*version), "version must be an explicit semantic release version")
 	s.Check(flag.NArg() == 0, "unexpected arguments: %v", flag.Args())
+	targets := [][2]string{{"linux", "amd64"}, {"linux", "arm64"}, {"darwin", "amd64"}, {"darwin", "arm64"}}
+	if *selectedTarget != "" {
+		var selected [][2]string
+		for _, target := range targets {
+			if target[0]+"/"+target[1] == *selectedTarget {
+				selected = append(selected, target)
+			}
+		}
+		s.Check(len(selected) == 1, "unsupported target %q; use linux/amd64, linux/arm64, darwin/amd64, or darwin/arm64", *selectedTarget)
+		targets = selected
+	}
 	s.Must(os.MkdirAll(*output, 0755))
 	checksums := []string{}
-	for _, target := range [][2]string{{"linux", "amd64"}, {"linux", "arm64"}, {"darwin", "amd64"}, {"darwin", "arm64"}} {
+	for _, target := range targets {
 		func() {
 			dir := s.Temp("koala-release-")
 			defer os.RemoveAll(dir)
