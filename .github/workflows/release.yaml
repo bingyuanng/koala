@@ -12,7 +12,12 @@ concurrency:
   group: versioned-release
   cancel-in-progress: false
 jobs:
+  vulnerabilities:
+    uses: ./.github/workflows/security.yaml
+    permissions:
+      contents: read
   release:
+    needs: vulnerabilities
     runs-on: ubuntu-latest
     env:
       RELEASE_VERSION: ${{ inputs.version }}

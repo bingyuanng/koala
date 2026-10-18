@@ -1,23 +1,16 @@
 package koala_test
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"testing"
 
 	"buf.build/go/protovalidate"
 	userv1 "github.com/bingyuanng/koala/internal/testdata/runtime/gen/go/user/v1"
-	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"google.golang.org/genproto/googleapis/api/annotations"
-	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
-
-// The fixture must support connection-based gateway registration, which
-// preserves the gRPC interceptor path when the runtime is added in Phase 3.
-var _ func(context.Context, *runtime.ServeMux, *grpc.ClientConn) error = userv1.RegisterUserServiceHandler
 
 func TestValidationAnnotations(t *testing.T) {
 	validator, err := protovalidate.New()

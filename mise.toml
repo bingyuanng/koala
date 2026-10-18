@@ -1,5 +1,5 @@
 [tools]
-go = "1.26.7"
+go = "1.26.9"
 buf = "1.73.0"
 "go:google.golang.org/protobuf/cmd/protoc-gen-go" = "1.36.12"
 "go:google.golang.org/grpc/cmd/protoc-gen-go-grpc" = "1.6.2"

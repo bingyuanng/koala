@@ -7,9 +7,10 @@ import (
 	"testing"
 )
 
-// The shell is compiled against the checked-in UserService transport fixture.
-// No generation tool or remote service is required by ordinary tests.
+// A rendered service must compile against its generated server interface.
+// Retained transport fixtures keep this check independent of Buf and remote services.
 func TestRenderedServiceBuilds(t *testing.T) {
+	t.Parallel()
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -58,11 +59,11 @@ func TestRenderedServiceBuilds(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Use this checkout and its cached dependencies rather than a published release.
-	// A build resolves only application dependencies. Tidy also loads dependency
+	// List resolves only application dependencies. Tidy also loads dependency
 	// tests, whose modules need not be cached by an ordinary repository build.
 	for _, args := range [][]string{
 		{"mod", "edit", "-replace=github.com/bingyuanng/koala=" + root},
-		{"build", "-mod=mod", "./..."},
+		{"list", "-mod=mod", "-deps", "./..."},
 		{"build", "-mod=readonly", "./..."},
 	} {
 		cmd := exec.Command("go", args...)
