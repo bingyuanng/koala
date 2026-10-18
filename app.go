@@ -3,6 +3,7 @@ package koala
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -71,6 +72,7 @@ type App struct {
 	healthy                  atomic.Bool
 	grpcAddress, httpAddress string
 	logger                   *slog.Logger
+	gatewayToken             string
 }
 
 // New constructs the transport runtime from server settings and explicit options.
@@ -91,7 +93,7 @@ func New(server ServerConfig, o Options) (*App, error) {
 	if o.Telemetry == nil || o.Telemetry.Traces == nil || o.Telemetry.Metrics == nil {
 		return nil, errors.New("koala: Telemetry with trace and metric providers is required; construct and pass providers explicitly")
 	}
-	return &App{server: server, requests: o.Requests, options: o, methods: map[string]time.Duration{}, ready: make(chan struct{}), logger: logger}, nil
+	return &App{server: server, requests: o.Requests, options: o, methods: map[string]time.Duration{}, ready: make(chan struct{}), logger: logger, gatewayToken: rand.Text()}, nil
 }
 func cloneMap(m map[string]string) map[string]string {
 	n := map[string]string{}
