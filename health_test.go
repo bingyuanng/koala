@@ -21,20 +21,9 @@ func probeTestApp(t *testing.T) *App {
 	return app
 }
 
-func TestProbesAreApplicationSelected(t *testing.T) {
+func TestApplicationHTTPRoutes(t *testing.T) {
 	app := probeTestApp(t)
-	handler, err := app.httpHandler(nil, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, path := range []string{"/healthz", "/readyz", "/livez"} {
-		response := httptest.NewRecorder()
-		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
-		if response.Code != http.StatusNotFound {
-			t.Fatalf("implicit %s: %d", path, response.Code)
-		}
-	}
-	handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusAccepted) })
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusAccepted) })
 	if err := app.HandleHTTP("GET /readyz", handler); err != nil {
 		t.Fatal(err)
 	}

@@ -30,7 +30,6 @@ func TestExplicitApplicationResources(t *testing.T) {
 		}
 	}
 	cfg := config.DefaultConfig()
-	cfg.Logging.Level = "error"
 	app, err := koala.New(cfg.Server, koala.Options{Requests: cfg.Requests, Logger: logger, Telemetry: providers})
 	if err != nil {
 		t.Fatal(err)

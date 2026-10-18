@@ -60,9 +60,6 @@ func TestRegistryIsDeterministic(t *testing.T) {
 	if string(first) != string(second) || !strings.Contains(string(first), "RegisterUserServiceHandler") {
 		t.Fatal("registry contract")
 	}
-	if e := CheckFresh(context.Background(), t.TempDir()); e == nil {
-		t.Fatal("missing config accepted")
-	}
 }
 
 func TestMergedOpenAPIValidation(t *testing.T) {
@@ -77,5 +74,11 @@ func TestMergedOpenAPIValidation(t *testing.T) {
 	missing := strings.Replace(string(good), "#/definitions/Response", "#/definitions/Missing", 1)
 	if validateSpec([]byte(missing)) == nil {
 		t.Fatal("missing schema accepted")
+	}
+}
+
+func TestFreshnessRequiresProjectConfig(t *testing.T) {
+	if err := CheckFresh(context.Background(), t.TempDir()); err == nil {
+		t.Fatal("missing config accepted")
 	}
 }

@@ -91,8 +91,11 @@ func TestEnvironmentJSONDoesNotAddDefaultsOrReadFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got map[string]map[string]string
-	if err := json.Unmarshal(out.Bytes(), &got); err != nil || got["app"]["environment"] != "" {
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatal("empty environment value was replaced", err, out.String())
+	}
+	if value, ok := got["app"]["environment"]; !ok || value != "" {
+		t.Fatal("empty environment value was omitted or replaced", out.String())
 	}
 	entries, err := os.ReadDir(".")
 	if err != nil || len(entries) != 0 {

@@ -174,14 +174,34 @@ func TestTransportPoliciesAndDocs(t *testing.T) {
 	if e := a.Register(registration()); e == nil {
 		t.Fatal("late registration accepted")
 	}
-	if _, e := client.CreateUser(context.Background(), &userv1.CreateUserRequest{}); status.Code(e) != codes.InvalidArgument || len(status.Convert(e).Details()) == 0 {
-		t.Fatalf("validation %v", e)
+	for _, tt := range []struct {
+		name    string
+		request *userv1.CreateUserRequest
+	}{
+		{"missing name", &userv1.CreateUserRequest{}},
+		{"invalid email", &userv1.CreateUserRequest{Name: "Ada", Email: "invalid"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := client.CreateUser(context.Background(), tt.request)
+			if status.Code(err) != codes.InvalidArgument || len(status.Convert(err).Details()) == 0 {
+				t.Fatalf("validation %v", err)
+			}
+		})
 	}
-	if _, e := client.GetUser(context.Background(), &userv1.GetUserRequest{Id: "panic"}); status.Code(e) != codes.Internal {
-		t.Fatal(e)
-	}
-	if _, e := client.GetUser(context.Background(), &userv1.GetUserRequest{Id: "wait"}); status.Code(e) != codes.DeadlineExceeded {
-		t.Fatal(e)
+	for _, tt := range []struct {
+		name, id string
+		want     codes.Code
+	}{
+		{"missing ID", "", codes.InvalidArgument},
+		{"panic recovery", "panic", codes.Internal},
+		{"method timeout", "wait", codes.DeadlineExceeded},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := client.GetUser(context.Background(), &userv1.GetUserRequest{Id: tt.id})
+			if status.Code(err) != tt.want {
+				t.Fatalf("got %v, want %s", err, tt.want)
+			}
+		})
 	}
 	_, addr := a.Addresses()
 	base := "http://" + addr
@@ -189,20 +209,22 @@ func TestTransportPoliciesAndDocs(t *testing.T) {
 		method, path, body string
 		code               int
 	}{{"POST", "/v1/users", `{"name":"Ada","email":"ada@example.com"}`, 200}, {"POST", "/v1/users", `{"name":""}`, 400}, {"GET", "/v1/users/1", "", 200}, {"GET", "/v1/users/wait", "", 504}, {"GET", "/v1/users/panic", "", 500}, {"GET", "/readyz", "", 200}, {"GET", "/openapi.json", "", 200}, {"GET", "/docs", "", 200}} {
-		req, _ := http.NewRequest(tt.method, base+tt.path, strings.NewReader(tt.body))
-		req.Header.Set("Content-Type", "application/json")
-		resp, e := http.DefaultClient.Do(req)
-		if e != nil {
-			t.Fatal(e)
-		}
-		b, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if resp.StatusCode != tt.code {
-			t.Fatalf("%s: %d %s", tt.path, resp.StatusCode, b)
-		}
-		if bytes.Contains(b, []byte("private secret")) {
-			t.Fatal("panic leaked")
-		}
+		t.Run(tt.method+" "+tt.path, func(t *testing.T) {
+			req, _ := http.NewRequest(tt.method, base+tt.path, strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			resp, e := http.DefaultClient.Do(req)
+			if e != nil {
+				t.Fatal(e)
+			}
+			b, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode != tt.code {
+				t.Fatalf("%s: %d %s", tt.path, resp.StatusCode, b)
+			}
+			if bytes.Contains(b, []byte("private secret")) {
+				t.Fatal("panic leaked")
+			}
+		})
 	}
 }
 func TestGRPCOnlyAndRollback(t *testing.T) {

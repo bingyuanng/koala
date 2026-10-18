@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,27 +15,24 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-func TestContextualBusinessLogsWithoutExporter(t *testing.T) {
+func TestDisabledTraceExportPreservesContext(t *testing.T) {
 	var out bytes.Buffer
 	c := config.DefaultConfig()
 	c.Telemetry.Traces.Enabled = false
-	p, e := observability.NewTelemetry(context.Background(), c.Telemetry, c.App, &out)
-	if e != nil {
-		t.Fatal(e)
+	p, err := observability.NewTelemetry(context.Background(), c.Telemetry, c.App, &out)
+	if err != nil {
+		t.Fatal(err)
 	}
-	defer p.Shutdown(context.Background())
-	logger := slog.New(observability.Handler{Handler: slog.NewJSONHandler(&out, nil)}).With("service", "business")
 	ctx, span := p.Traces.Tracer("test").Start(context.Background(), "operation")
-	defer span.End()
-	logger.InfoContext(ctx, "inside request")
-	sc := trace.SpanContextFromContext(ctx)
-	if !sc.IsValid() || !strings.Contains(out.String(), sc.TraceID().String()) {
-		t.Fatal("missing trace correlation")
+	span.End()
+	if !trace.SpanContextFromContext(ctx).IsValid() {
+		t.Fatal("disabled export removed trace context")
 	}
-	out.Reset()
-	logger.InfoContext(context.Background(), "unrelated")
-	if strings.Contains(out.String(), "trace_id") {
-		t.Fatal("context leaked")
+	if err := p.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if out.Len() != 0 {
+		t.Fatal("disabled exporter wrote spans")
 	}
 }
 

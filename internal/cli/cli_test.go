@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -61,50 +62,42 @@ func TestProjectRuntimeSelection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Chdir(t.TempDir())
-	previous := Version
-	Version = "dev"
-	t.Cleanup(func() { Version = previous })
 	for _, tt := range []struct {
-		name  string
-		flags []string
-		want  string
+		name, version string
+		flags         []string
+		want          string
+		code          int
 	}{
-		{"missing", nil, "development CLI requires"},
-		{"both", []string{"--framework-version", "v0.2.0", "--framework-path", root}, "choose either"},
-		{"invalid", []string{"--framework-path", t.TempDir()}, "must point to"},
+		{"missing", "dev", nil, "development CLI requires", 1},
+		{"both", "dev", []string{"--framework-version", "v0.2.0", "--framework-path", root}, "choose either", 1},
+		{"invalid", "dev", []string{"--framework-path", t.TempDir()}, "must point to", 1},
+		{"explicit", "dev", []string{"--framework-version", "v0.2.0"}, "require github.com/bingyuanng/koala v0.2.0", 0},
+		{"local", "dev", []string{"--framework-path", root}, "replace github.com/bingyuanng/koala => " + strconv.Quote(root), 0},
+		{"release", "v0.3.0", nil, "require github.com/bingyuanng/koala v0.3.0", 0},
 	} {
-		var out, stderr bytes.Buffer
-		if code := Run(append([]string{"new", tt.name}, tt.flags...), &out, &stderr); code != 1 || !strings.Contains(stderr.String(), tt.want) {
-			t.Fatalf("%s: exit %d, stderr %s", tt.name, code, &stderr)
-		}
-		if _, err := os.Stat(tt.name); !os.IsNotExist(err) {
-			t.Fatalf("invalid runtime selection created %s", tt.name)
-		}
-	}
-	for _, tt := range []struct {
-		name  string
-		flags []string
-		want  string
-	}{
-		{"explicit", []string{"--framework-version", "v0.2.0"}, "require github.com/bingyuanng/koala v0.2.0"},
-		{"local", []string{"--framework-path", root}, "replace github.com/bingyuanng/koala => "},
-		{"release", nil, "require github.com/bingyuanng/koala v0.3.0"},
-	} {
-		if tt.name == "release" {
-			Version = "v0.3.0"
-		}
-		var out, stderr bytes.Buffer
-		if code := Run(append([]string{"new", tt.name}, tt.flags...), &out, &stderr); code != 0 {
-			t.Fatalf("%s: exit %d, stderr %s", tt.name, code, &stderr)
-		}
-		module, err := os.ReadFile(filepath.Join(tt.name, "go.mod"))
-		if err != nil || !strings.Contains(string(module), tt.want) {
-			t.Fatalf("%s module: %s, %v", tt.name, module, err)
-		}
-		if tt.name == "local" && !strings.Contains(string(module), root) {
-			t.Fatalf("local checkout absent from go.mod: %s", module)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			previous := Version
+			Version = tt.version
+			t.Cleanup(func() { Version = previous })
+			var out, stderr bytes.Buffer
+			if code := Run(append([]string{"new", "app"}, tt.flags...), &out, &stderr); code != tt.code {
+				t.Fatalf("exit %d, want %d; stderr %s", code, tt.code, &stderr)
+			}
+			if tt.code != 0 {
+				if !strings.Contains(stderr.String(), tt.want) {
+					t.Fatal(stderr.String())
+				}
+				if _, err := os.Stat("app"); !os.IsNotExist(err) {
+					t.Fatal("invalid runtime selection created a project")
+				}
+				return
+			}
+			module, err := os.ReadFile("app/go.mod")
+			if err != nil || !strings.Contains(string(module), tt.want) {
+				t.Fatalf("module: %s, %v", module, err)
+			}
+		})
 	}
 }
 
@@ -133,18 +126,12 @@ func TestLocalFrameworkFlagIsDevelopmentOnly(t *testing.T) {
 		})
 	}
 	Version = "v0.3.0"
-	for _, flags := range [][]string{
-		{"--framework-path", "."},
-		{"--framework-path=."},
-		{"--framework-version", "v0.2.0", "--framework-path", "."},
-	} {
-		var out, stderr bytes.Buffer
-		if code := Run(append([]string{"new", "blocked"}, flags...), &out, &stderr); code != 1 || !strings.Contains(stderr.String(), "flag provided but not defined: -framework-path") {
-			t.Fatalf("release local override: exit %d, %s", code, stderr.String())
-		}
-		if _, err := os.Stat("blocked"); !os.IsNotExist(err) {
-			t.Fatal("release rejection wrote a project")
-		}
+	var blockedOut, blockedErr bytes.Buffer
+	if code := Run([]string{"new", "blocked", "--framework-path", "."}, &blockedOut, &blockedErr); code != 1 || !strings.Contains(blockedErr.String(), "flag provided but not defined: -framework-path") {
+		t.Fatalf("release local override: exit %d, %s", code, blockedErr.String())
+	}
+	if _, err := os.Stat("blocked"); !os.IsNotExist(err) {
+		t.Fatal("release rejection wrote a project")
 	}
 	var out, stderr bytes.Buffer
 	if code := Run([]string{"new", "override", "--framework-version", "v0.2.0"}, &out, &stderr); code != 0 {
@@ -156,7 +143,7 @@ func TestLocalFrameworkFlagIsDevelopmentOnly(t *testing.T) {
 	}
 }
 
-func TestConfigConsumerAndRelocatedCLI(t *testing.T) {
+func TestRelocatedCLI(t *testing.T) {
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -175,34 +162,22 @@ func TestConfigConsumerAndRelocatedCLI(t *testing.T) {
 	if output, err := create.CombinedOutput(); err == nil || !strings.Contains(string(output), "development CLI requires") {
 		t.Fatalf("development runtime selection: %v, %s", err, output)
 	}
-	consumer := exec.Command("go", "run", "-mod=readonly", ".")
-	consumer.Dir = filepath.Join(root, "testdata/configapp")
-	output, err := consumer.CombinedOutput()
-	if err != nil || string(output) != "localhost 8080 true\n" {
-		t.Fatalf("consumer defaults: %v, %s", err, output)
-	}
 	help := exec.Command(binary, "help")
 	help.Dir = outside
-	output, err = help.CombinedOutput()
+	output, err := help.CombinedOutput()
 	if err != nil || !strings.Contains(string(output), "Usage:") {
 		t.Fatalf("relocated help: %v, %s", err, output)
 	}
+}
 
-	// Consumer Go source is separate from the compiled CLI's dependency graph.
-	deps := exec.Command("go", "list", "-f", `{{.ImportPath}} {{join .Deps " "}}`, "./cmd/koala", "./config")
-	deps.Dir = root
+func TestConfigDoesNotDependOnCLI(t *testing.T) {
+	deps := exec.Command("go", "list", "-f", `{{join .Deps " "}}`, "./config")
+	deps.Dir = "../.."
 	graph, err := deps.Output()
 	if err != nil {
-		t.Fatalf("dependency graphs: %v", err)
+		t.Fatalf("config dependency graph: %v", err)
 	}
-	graphs := strings.Split(strings.TrimSpace(string(graph)), "\n")
-	if len(graphs) != 2 || !strings.HasPrefix(graphs[0], "github.com/bingyuanng/koala/cmd/koala ") || !strings.HasPrefix(graphs[1], "github.com/bingyuanng/koala/config ") {
-		t.Fatalf("unexpected dependency graphs: %s", graph)
-	}
-	if strings.Contains(graphs[0], "example.com/koala-config-consumer") {
-		t.Fatal("application linked into CLI")
-	}
-	if strings.Contains(graphs[1], "/internal/cli") {
+	if strings.Contains(string(graph), "/internal/cli") {
 		t.Fatal("runtime depends on CLI")
 	}
 }

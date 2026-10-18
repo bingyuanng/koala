@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -98,8 +97,7 @@ func TestMetricsWithoutTraceExportAndCallerDeadline(t *testing.T) {
 	defer mp.Shutdown(context.Background())
 	tp := sdktrace.NewTracerProvider()
 	defer tp.Shutdown(context.Background())
-	a, conn, stop := start(t, testConfig(), koala.Options{Telemetry: &observability.Providers{Traces: tp, Metrics: mp}})
-	_ = a
+	_, conn, stop := start(t, testConfig(), koala.Options{Telemetry: &observability.Providers{Traces: tp, Metrics: mp}})
 	defer stop()
 	client := userv1.NewUserServiceClient(conn)
 	client.CreateUser(context.Background(), &userv1.CreateUserRequest{})
@@ -172,35 +170,32 @@ func TestDocsDisablementAndCORS(t *testing.T) {
 	a, _, stop := start(t, c, koala.Options{OpenAPI: []byte(`{}`)})
 	defer stop()
 	_, addr := a.Addresses()
-	for _, path := range []string{"/docs", "/openapi.json"} {
-		resp, e := http.Get("http://" + addr + path)
-		if e != nil {
-			t.Fatal(e)
-		}
-		resp.Body.Close()
-		if resp.StatusCode != 404 {
-			t.Fatal("documentation exposed", path)
-		}
-	}
-	req, _ := http.NewRequest("OPTIONS", "http://"+addr+"/v1/users/1", nil)
-	req.Header.Set("Origin", "https://allowed.example")
-	resp, e := http.DefaultClient.Do(req)
-	if e != nil {
-		t.Fatal(e)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != 204 {
-		t.Fatal(resp.StatusCode)
-	}
-	req, _ = http.NewRequest("GET", "http://"+addr+"/v1/users/1", strings.NewReader(""))
-	req.Header.Set("Origin", "https://blocked.example")
-	resp, e = http.DefaultClient.Do(req)
-	if e != nil {
-		t.Fatal(e)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != 403 {
-		t.Fatal(resp.StatusCode)
+	for _, tt := range []struct {
+		name, method, path, origin string
+		status                     int
+	}{
+		{"docs disabled", "GET", "/docs", "", 404},
+		{"OpenAPI disabled", "GET", "/openapi.json", "", 404},
+		{"allowed preflight", "OPTIONS", "/v1/users/1", "https://allowed.example", 204},
+		{"blocked origin", "GET", "/v1/users/1", "https://blocked.example", 403},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			req, err := http.NewRequest(tt.method, "http://"+addr+tt.path, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.origin != "" {
+				req.Header.Set("Origin", tt.origin)
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp.Body.Close()
+			if resp.StatusCode != tt.status {
+				t.Fatalf("got HTTP %d, want %d", resp.StatusCode, tt.status)
+			}
+		})
 	}
 }
 
@@ -224,23 +219,27 @@ func TestUnknownPolicyAndDuplicateRegistration(t *testing.T) {
 	}
 }
 
-func TestHookCannotDetachDeadlineOrCrashWithNilContext(t *testing.T) {
-	hook := func(ctx context.Context, method string) (context.Context, error) { return context.Background(), nil }
-	c := testConfig()
-	c.Requests.DefaultTimeout = "20ms"
-	_, conn, stop := start(t, c, koala.Options{Authenticate: hook})
-	client := userv1.NewUserServiceClient(conn)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	if _, e := client.GetUser(ctx, &userv1.GetUserRequest{Id: "wait"}); status.Code(e) != codes.DeadlineExceeded {
-		t.Fatal(e)
-	}
-	stop()
-	hook = func(ctx context.Context, method string) (context.Context, error) { return nil, nil }
-	_, conn, stop = start(t, testConfig(), koala.Options{Authenticate: hook})
-	defer stop()
-	client = userv1.NewUserServiceClient(conn)
-	if _, e := client.GetUser(context.Background(), &userv1.GetUserRequest{Id: "1"}); status.Code(e) != codes.Internal {
-		t.Fatal(e)
+func TestAuthenticationHookContexts(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		hook koala.Hook
+		id   string
+		want codes.Code
+	}{
+		{"detached context", func(context.Context, string) (context.Context, error) { return context.Background(), nil }, "wait", codes.DeadlineExceeded},
+		{"nil context", func(context.Context, string) (context.Context, error) { return nil, nil }, "1", codes.Internal},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c := testConfig()
+			c.Requests.DefaultTimeout = "20ms"
+			_, conn, stop := start(t, c, koala.Options{Authenticate: tt.hook})
+			t.Cleanup(stop)
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			_, err := userv1.NewUserServiceClient(conn).GetUser(ctx, &userv1.GetUserRequest{Id: tt.id})
+			if status.Code(err) != tt.want {
+				t.Fatalf("got %v, want %s", err, tt.want)
+			}
+		})
 	}
 }

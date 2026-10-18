@@ -66,7 +66,7 @@ func TestGatewayWithoutProbes(t *testing.T) {
 	}
 	grpcAddr, httpAddr := app.Addresses()
 	client := &http.Client{Timeout: time.Second}
-	for path, want := range map[string]int{"/readyz": 404, "/livez": 404, "/v1/users/123": 200} {
+	for path, want := range map[string]int{"/healthz": 404, "/readyz": 404, "/livez": 404, "/v1/users/123": 200} {
 		response, err := client.Get("http://" + httpAddr + path)
 		if err != nil {
 			t.Fatal(err)

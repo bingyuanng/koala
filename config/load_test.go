@@ -54,7 +54,9 @@ func TestExplicitSourcesIgnoreEnvironmentSelector(t *testing.T) {
 
 func TestDevProdEquivalence(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "dev.json")
-	os.WriteFile(file, []byte(`{"database":{"password":"001","count":0,"active":false}}`), 0600)
+	if err := os.WriteFile(file, []byte(`{"database":{"password":"001","count":0,"active":false}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
 	defaults := func() appConfig {
 		c := appConfig{Framework: DefaultConfig()}
 		c.Database.Count = 3
@@ -95,7 +97,9 @@ func TestLoaderRejectsInvalidSourcesWithoutSecrets(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			file := filepath.Join(t.TempDir(), "dev.json")
-			os.WriteFile(file, []byte(tt.body), 0600)
+			if err := os.WriteFile(file, []byte(tt.body), 0600); err != nil {
+				t.Fatal(err)
+			}
 			_, e := LoadWithOptions(Options[appConfig]{File: file, Environment: tt.environment, Env: tt.env, Required: tt.required})
 			if e == nil || strings.Contains(e.Error(), "SECRET") {
 				t.Fatalf("expected secret-safe error: %v", e)
@@ -113,18 +117,22 @@ func TestEnvironmentPathCollisions(t *testing.T) {
 	}
 }
 func TestFrameworkValidation(t *testing.T) {
-	c := DefaultConfig()
-	if e := Validate(c); e != nil {
-		t.Fatal(e)
-	}
-	c.Requests.DefaultTimeout = "-1s"
-	if Validate(c) == nil {
-		t.Fatal("negative budget accepted")
-	}
-	c = DefaultConfig()
-	c.Server.HTTP.WriteTimeout = "1s"
-	if Validate(c) == nil {
-		t.Fatal("short write timeout accepted")
+	for _, tt := range []struct {
+		name      string
+		change    func(*Config)
+		wantError bool
+	}{
+		{"defaults", func(*Config) {}, false},
+		{"negative budget", func(c *Config) { c.Requests.DefaultTimeout = "-1s" }, true},
+		{"short write timeout", func(c *Config) { c.Server.HTTP.WriteTimeout = "1s" }, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c := DefaultConfig()
+			tt.change(&c)
+			if err := Validate(c); (err != nil) != tt.wantError {
+				t.Fatalf("validation error = %v, want error %v", err, tt.wantError)
+			}
+		})
 	}
 }
 
