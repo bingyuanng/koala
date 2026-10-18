@@ -7,23 +7,7 @@ validation, deadlines, structured logging, OpenTelemetry instrumentation, and
 embedded OpenAPI documentation.
 
 The framework is under active development. This repository contains the runtime,
-CLI, code generators, and application templates. Notion tracks the design,
-implementation status, and remaining release work. Some documentation describes
-planned behavior; check its current implementation notes before relying on it.
-
-## Documentation
-
-Notion is the source of truth for project documentation:
-
-- [Project overview](https://www.notion.so/3f62a93ebee08004854ff018cc58406a)
-- [Architecture and design](https://www.notion.so/3f62a93ebee081169554f0a64b221644)
-- [Implementation plan](https://www.notion.so/3f62a93ebee08168a8d9d589fb983a5c)
-- [Implementation phases](https://www.notion.so/3f62a93ebee081449790ebd40bfa4d0f)
-- [Configuration and CLI guide](https://www.notion.so/3f62a93ebee0819f83badea55aabffa6)
-
-Start with the configuration and CLI guide to create an application from a
-checkout, generate its API code, and run it locally. Keep design and configuration
-documentation updates in Notion.
+CLI, code generators, and application templates.
 
 ## Working on Koala
 
@@ -45,6 +29,3 @@ go test ./...
 go vet ./...
 go test -race ./...
 ```
-
-See the configuration and CLI guide for generation, consumer workflow, and
-release verification commands.
