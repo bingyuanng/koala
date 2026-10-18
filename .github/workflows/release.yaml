@@ -7,7 +7,7 @@ on:
         required: true
         type: string
 permissions:
-  contents: write
+  contents: read
 concurrency:
   group: versioned-release
   cancel-in-progress: false
@@ -16,7 +16,7 @@ jobs:
     uses: ./.github/workflows/security.yaml
     permissions:
       contents: read
-  release:
+  prepare:
     needs: vulnerabilities
     runs-on: ubuntu-latest
     env:
@@ -52,8 +52,32 @@ jobs:
         run: |
           go test ./...
           go vet ./...
+<<<<<<< HEAD
       - name: Build CLI archives and checksums
         run: go run ./scripts/build-release --version "$RELEASE_VERSION"
+=======
+  build:
+    needs: prepare
+    uses: ./.github/workflows/build.yaml
+    with:
+      version: ${{ inputs.version }}
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-archives
+          path: dist
+      - name: Verify archive checksums
+        working-directory: dist
+        run: sha256sum --check SHA256SUMS
+>>>>>>> c53b9d1 (chore: split build workflow)
       - name: Create tag and publish matching runtime and CLI
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

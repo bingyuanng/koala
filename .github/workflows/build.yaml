@@ -1,0 +1,52 @@
+name: Platform builds
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  build:
+    name: Build ${{ matrix.os }}/${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [linux, darwin]
+        arch: [amd64, arm64]
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      BUILD_TARGET: ${{ matrix.os }}/${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build CLI archive
+        run: python3 scripts/build-release.py --version "$RELEASE_VERSION" --target "$BUILD_TARGET"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+  collect:
+    name: Collect archives and checksums
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cli-*
+          path: dist
+          merge-multiple: true
+      - name: Generate combined checksums
+        working-directory: dist
+        run: sha256sum *.tar.gz > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-archives
+          path: dist/*
+          if-no-files-found: error
