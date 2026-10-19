@@ -32,70 +32,70 @@ func Load[T any](defaults func() T, validate func(T) error) (T, error) {
 }
 
 // LoadWithOptions loads and validates configuration from explicitly selected sources.
-func LoadWithOptions[T any](o Options[T]) (T, error) {
-	o = resolveSources(o)
-	environment := o.Environment
-	for _, e := range o.Env {
-		k, v, ok := strings.Cut(e, "=")
-		if ok && k == o.Prefix+"ENV" && environment == "" {
-			environment = v
+func LoadWithOptions[T any](options Options[T]) (T, error) {
+	options = resolveSources(options)
+	environment := options.Environment
+	for _, entry := range options.Env {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok && key == options.Prefix+"ENV" && environment == "" {
+			environment = value
 		}
 	}
-	return load(o, environment == "" || environment == "dev")
+	return load(options, environment == "" || environment == "dev")
 }
 
 // LoadFile merges defaults, the named JSON file, and environment overrides.
 // The caller selects the file explicitly; Environment and KOALA_ENV do not select sources.
-func LoadFile[T any](file string, o Options[T]) (T, error) {
+func LoadFile[T any](file string, options Options[T]) (T, error) {
 	if file == "" {
 		var zero T
 		return zero, fmt.Errorf("config: configuration file path is required")
 	}
-	o.File = file
-	return load(resolveSources(o), true)
+	options.File = file
+	return load(resolveSources(options), true)
 }
 
 // LoadEnv merges defaults and environment overrides without reading a file.
-func LoadEnv[T any](o Options[T]) (T, error) {
-	return load(resolveSources(o), false)
+func LoadEnv[T any](options Options[T]) (T, error) {
+	return load(resolveSources(options), false)
 }
 
-func resolveSources[T any](o Options[T]) Options[T] {
-	if o.Prefix == "" {
-		o.Prefix = "KOALA_"
+func resolveSources[T any](options Options[T]) Options[T] {
+	if options.Prefix == "" {
+		options.Prefix = "KOALA_"
 	}
-	if o.Env == nil {
-		o.Env = os.Environ()
+	if options.Env == nil {
+		options.Env = os.Environ()
 	}
-	return o
+	return options
 }
 
-func load[T any](o Options[T], readFile bool) (T, error) {
+func load[T any](options Options[T], readFile bool) (T, error) {
 	var zero T
-	cfg := zero
-	if o.Defaults != nil {
-		cfg = o.Defaults()
+	configuration := zero
+	if options.Defaults != nil {
+		configuration = options.Defaults()
 	}
-	value := reflect.ValueOf(&cfg).Elem()
-	if value.Kind() != reflect.Struct {
+	destination := reflect.ValueOf(&configuration).Elem()
+	if destination.Kind() != reflect.Struct {
 		return zero, fmt.Errorf("config: destination must be a struct")
 	}
-	prefix, env := o.Prefix, o.Env
-	index := map[string]fieldPath{}
-	schema, err := indexFields(value.Type(), nil, prefix, index, map[reflect.Type]bool{})
+	prefix, environment := options.Prefix, options.Env
+	fieldsByEnvironment := map[string]fieldPath{}
+	schema, err := indexFields(destination.Type(), nil, prefix, fieldsByEnvironment, map[reflect.Type]bool{})
 	if err != nil {
 		return zero, err
 	}
-	if _, ok := index[prefix+"ENV"]; ok {
+	if _, ok := fieldsByEnvironment[prefix+"ENV"]; ok {
 		return zero, fmt.Errorf("config: field collides with reserved environment key")
 	}
-	tree, err := defaultsTree(cfg)
+	merged, err := defaultsTree(configuration)
 	if err != nil {
 		return zero, err
 	}
-	present := map[string]bool{}
+	suppliedPaths := map[string]bool{}
 	if readFile {
-		file := o.File
+		file := options.File
 		if file == "" {
 			file = "config.dev.json"
 		}
@@ -107,82 +107,92 @@ func load[T any](o Options[T], readFile bool) (T, error) {
 		if err != nil {
 			return zero, err
 		}
-		if err := decodeTree(source, reflect.New(value.Type()).Interface(), ""); err != nil {
+		if err := decodeTree(source, reflect.New(destination.Type()).Interface(), ""); err != nil {
 			return zero, err
 		}
-		tree, err = schema.merge(tree, source, "", present)
+		merged, err = schema.merge(merged, source, "", suppliedPaths)
 		if err != nil {
 			return zero, err
 		}
 	}
-	overrides := map[string]string{}
-	for _, e := range env {
-		k, v, ok := strings.Cut(e, "=")
-		if !ok || !strings.HasPrefix(k, prefix) || k == prefix+"ENV" {
+	values := map[string]string{}
+	for _, entry := range environment {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok || !strings.HasPrefix(key, prefix) || key == prefix+"ENV" {
 			continue
 		}
-		if _, ok = index[k]; !ok {
-			return zero, fmt.Errorf("config: unknown environment setting %s", k)
+		if _, known := fieldsByEnvironment[key]; !known {
+			return zero, fmt.Errorf("config: unknown environment setting %s", key)
 		}
-		if _, ok = overrides[k]; ok {
-			return zero, fmt.Errorf("config: duplicate environment setting %s", k)
+		if _, duplicate := values[key]; duplicate {
+			return zero, fmt.Errorf("config: duplicate environment setting %s", key)
 		}
-		overrides[k] = v
+		values[key] = value
 	}
-	keys := make([]string, 0, len(overrides))
-	for k := range overrides {
-		keys = append(keys, k)
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	for _, k := range keys {
-		childPrefix := k + "__"
-		i := sort.SearchStrings(keys, childPrefix)
-		if i < len(keys) && strings.HasPrefix(keys[i], childPrefix) {
-			return zero, fmt.Errorf("config: overlapping settings %s and %s", k, keys[i])
+	for _, key := range keys {
+		childPrefix := key + "__"
+		childIndex := sort.SearchStrings(keys, childPrefix)
+		if childIndex < len(keys) && strings.HasPrefix(keys[childIndex], childPrefix) {
+			return zero, fmt.Errorf("config: overlapping settings %s and %s", key, keys[childIndex])
 		}
 	}
-	for _, k := range keys {
-		f := index[k]
-		var source any = overrides[k]
-		if f.schema.kind != reflect.String {
-			source, err = parseJSON([]byte(overrides[k]), f.path)
-			if err != nil {
-				return zero, fmt.Errorf("config: %s expects %s", f.path, f.schema.typ)
-			}
+	for _, key := range keys {
+		source, err := environmentSource(fieldsByEnvironment[key], values[key])
+		if err != nil {
+			return zero, err
 		}
-		// Validate each source before merging so an override cannot hide invalid input.
-		if err := decodeTree(source, reflect.New(f.schema.typ).Interface(), f.path); err != nil {
-			return zero, fmt.Errorf("config: %s expects %s", f.path, f.schema.typ)
-		}
-		if f.quoted {
-			encoded, err := json.Marshal(source)
-			if err != nil {
-				return zero, fmt.Errorf("config: cannot encode %s", f.path)
-			}
-			source = string(encoded)
-		}
-		for i := len(f.names) - 1; i >= 0; i-- {
-			source = map[string]any{f.names[i]: source}
-		}
-		tree, err = schema.merge(tree, source, "", present)
+		merged, err = schema.merge(merged, source, "", suppliedPaths)
 		if err != nil {
 			return zero, err
 		}
 	}
 	var resolved T
-	if err := decodeTree(tree, &resolved, ""); err != nil {
+	if err := decodeTree(merged, &resolved, ""); err != nil {
 		return zero, err
 	}
-	value.Set(schema.preserveDefaults(value, reflect.ValueOf(resolved), "", present))
-	for _, path := range o.Required {
-		if !present[path] {
+	destination.Set(schema.preserveDefaults(destination, reflect.ValueOf(resolved), "", suppliedPaths))
+	for _, path := range options.Required {
+		if !suppliedPaths[path] {
 			return zero, fmt.Errorf("config: required setting %s is missing", path)
 		}
 	}
-	if o.Validate != nil {
-		if err := o.Validate(cfg); err != nil {
+	if options.Validate != nil {
+		if err := options.Validate(configuration); err != nil {
 			return zero, err
 		}
 	}
-	return cfg, nil
+	return configuration, nil
+}
+
+// environmentSource decodes and type-checks one value, then wraps it in the
+// nested JSON field names used by the shared merge rules.
+func environmentSource(field fieldPath, raw string) (any, error) {
+	var source any = raw
+	if field.schema.kind != reflect.String {
+		decoded, err := parseJSON([]byte(raw), field.path)
+		if err != nil {
+			return nil, fmt.Errorf("config: %s expects %s", field.path, field.schema.typ)
+		}
+		source = decoded
+	}
+	// Validate each source before merging so later overrides cannot hide bad input.
+	if err := decodeTree(source, reflect.New(field.schema.typ).Interface(), field.path); err != nil {
+		return nil, fmt.Errorf("config: %s expects %s", field.path, field.schema.typ)
+	}
+	if field.quoted {
+		encoded, err := json.Marshal(source)
+		if err != nil {
+			return nil, fmt.Errorf("config: cannot encode %s", field.path)
+		}
+		source = string(encoded)
+	}
+	for i := len(field.names) - 1; i >= 0; i-- {
+		source = map[string]any{field.names[i]: source}
+	}
+	return source, nil
 }

@@ -48,44 +48,10 @@ func gatewayErrorHandler(ctx context.Context, mux *runtime.ServeMux, marshaler r
 	runtime.DefaultHTTPErrorHandler(ctx, mux, marshaler, w, r, err)
 }
 
-type httpRoute struct {
-	pattern string
-	handler http.Handler
-}
-
-// HandleHTTP explicitly registers an application-owned route before Run.
-// Patterns use net/http.ServeMux syntax. HTTP-disabled apps do not serve them.
-func (a *App) HandleHTTP(pattern string, handler http.Handler) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.started {
-		return errors.New("koala: HTTP registration is closed")
-	}
-	if handler == nil {
-		return errors.New("koala: HTTP handler is required")
-	}
-	mux := http.NewServeMux()
-	for _, route := range a.httpRoutes {
-		if err := handleRoute(mux, route.pattern, route.handler); err != nil {
-			return err
-		}
-	}
-	if err := handleRoute(mux, pattern, handler); err != nil {
-		return err
-	}
-	a.httpRoutes = append(a.httpRoutes, httpRoute{pattern: pattern, handler: handler})
-	return nil
-}
-
 // HTTP annotation routes provide bounded operation names and the dispatch
 // deadline before gateway decoding. Additional bindings share the same policy.
 func (a *App) httpHandler(gateway http.Handler, p *observability.Providers) (http.Handler, error) {
 	mux := http.NewServeMux()
-	for _, route := range a.httpRoutes {
-		if err := handleRoute(mux, route.pattern, route.handler); err != nil {
-			return nil, err
-		}
-	}
 	if a.server.HTTP.Docs && len(a.options.OpenAPI) > 0 {
 		protect := func(next http.HandlerFunc) http.HandlerFunc {
 			return func(w http.ResponseWriter, r *http.Request) {
@@ -144,11 +110,6 @@ func handleRoute(m *http.ServeMux, p string, h http.Handler) (err error) {
 }
 
 func (a *App) hasHTTPRoute(verb, path string) bool {
-	for _, route := range a.httpRoutes {
-		if route.pattern == verb+" "+path || route.pattern == path {
-			return true
-		}
-	}
 	for _, registration := range a.registrations {
 		methods := registration.Descriptor.Methods()
 		for i := 0; i < methods.Len(); i++ {

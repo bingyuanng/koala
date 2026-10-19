@@ -3,6 +3,7 @@ package scaffold
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -71,7 +72,26 @@ func Render(kind string, data Data) ([]File, error) {
 	if err != nil {
 		return nil, err
 	}
-	return renderFS(root, data)
+	files, err := renderFS(root, data)
+	if err != nil || kind != "project" {
+		return files, err
+	}
+	// Record scaffolded generated files before the first generation. Empty input
+	// hashes keep this ownership record stale until koala gen completes.
+	files = append(files, File{Path: ".koala/descriptors.bin", Ownership: "generated"})
+	outputs := map[string]string{}
+	for _, file := range files {
+		if file.Ownership == "generated" {
+			outputs[file.Path] = fmt.Sprintf("%x", sha256.Sum256([]byte(file.Content)))
+		}
+	}
+	manifest, err := json.MarshalIndent(map[string]any{"version": 1, "contracts": "", "input": "", "outputs": outputs}, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	files = append(files, File{Path: ".koala/generation.json", Content: string(manifest) + "\n", Ownership: "generated"})
+	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+	return files, nil
 }
 
 // renderFS evaluates both names and .tmpl contents, preserving raw assets and
@@ -119,7 +139,7 @@ func renderFS(root fs.FS, data any) ([]File, error) {
 			content = string(formatted)
 		}
 		ownership := "application"
-		if strings.HasPrefix(target, "gen/") {
+		if (strings.HasPrefix(target, "gen/") && path.Base(target) != ".gitkeep") || target == "internal/bootstrap/services_gen.go" {
 			ownership = "generated"
 		}
 		files = append(files, File{Path: target, Content: content, Ownership: ownership})

@@ -184,7 +184,11 @@ func checkWorkflow() {
 	configuration["logging"].(map[string]any)["level"] = "error"
 	saveConfig := func() { writeJSON(p("config.dev.json"), configuration) }
 	saveConfig()
+	// New projects establish ownership before generation, including the placeholder registry.
+	initialRegistry := p("internal/bootstrap/services_gen.go")
+	s.Write(initialRegistry, s.Read(initialRegistry)+"\n// unsupported local edit\n")
 	gen(false, false)
+	s.NotContains(s.Read(initialRegistry), "unsupported local edit")
 	healthOnly := digest(project)
 	gen(true, false)
 	s.Compare(digest(project), healthOnly, "strict generation changed outputs")
@@ -201,8 +205,9 @@ func checkWorkflow() {
 	s.Check(ok, "embedding missing from ownership manifest")
 	s.Write(embedding, embeddingSource+"\n// modified locally\n")
 	s.Contains(fail("start"), "generated output gen/openapi/openapi_gen.go")
-	s.Contains(gen(false, true), "modified generated output gen/openapi/openapi_gen.go")
-	s.Write(embedding, embeddingSource)
+	gen(false, false)
+	s.Compare(s.Read(embedding), embeddingSource, "generation did not restore owned output")
+	checkHealthSources()
 	func() {
 		occupied, err := net.Listen("tcp", "127.0.0.1:0")
 		s.Must(err)
@@ -270,19 +275,19 @@ func checkWorkflow() {
 	s.Compare(s.Read(marker), "closed\n", "cleanup on shutdown differs")
 	s.Remove(marker)
 	s.Write(mainSource, originalMain)
-	registrationAnchor := "if err := bootstrap.RegisterAll(app, dependencies); err != nil {"
-	s.Contains(originalMain, registrationAnchor)
-	renamedMain := strings.ReplaceAll(originalMain, "import (", "import (\n\"net/http\"")
-	renamedMain = strings.ReplaceAll(renamedMain, registrationAnchor, probeRegistration+registrationAnchor)
-	s.Write(mainSource, renamedMain)
+	// Probe paths are application-owned protobuf bindings, requiring no startup edits.
+	healthContract := p(healthPaths[0])
+	renamedContract := strings.ReplaceAll(healthSources[healthPaths[0]], "/healthz", "/alive")
+	renamedContract = strings.ReplaceAll(renamedContract, "/readyz", "/available")
+	s.Write(healthContract, renamedContract)
+	gen(false, false)
 	serve(func(base, grpc string) {
-		s.Compare(jsonObject(request(base, "/readyz")), map[string]any{"status": "ok"}, "readiness failed")
+		s.Compare(jsonObject(request(base, "/available")), map[string]any{"status": "ok"}, "readiness failed")
+		s.Compare(jsonObject(request(base, "/alive")), map[string]any{"status": "ok"}, "health failed")
+		request(base, "/healthz", 404)
+		request(base, "/readyz", 404)
 		request(base, "/livez", 404)
-		request(base, "/available")
-		request(base, "/alive")
-		s.Compare(jsonObject(request(base, "/healthz")), map[string]any{"status": "ok"}, "health failed")
 	})
-	s.Write(mainSource, originalMain)
 	s.Must(os.RemoveAll(p("proto")))
 	s.Must(os.RemoveAll(p("internal/service")))
 	run("gen")
@@ -412,9 +417,4 @@ func(context.Context) error {
  _, err = f.WriteString("closed\n")
  return errors.Join(err, f.Close())
 }
-`
-
-const probeRegistration = `
-if err := app.HandleHTTP("GET /alive", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })); err != nil { return err }
-if err := app.HandleHTTP("GET /available", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { if !app.IsReady() { w.WriteHeader(http.StatusServiceUnavailable); return }; w.WriteHeader(http.StatusOK) })); err != nil { return err }
 `

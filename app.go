@@ -54,7 +54,6 @@ type App struct {
 	mu                       sync.Mutex
 	started                  bool
 	registrations            []Registration
-	httpRoutes               []httpRoute
 	methods                  map[string]time.Duration
 	ready                    chan struct{}
 	healthy                  atomic.Bool

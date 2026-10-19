@@ -1,10 +1,12 @@
 package koala_test
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"testing"
@@ -61,9 +63,6 @@ func TestGatewayWithoutProbes(t *testing.T) {
 			t.Error("ready after shutdown")
 		}
 	}()
-	if err := app.HandleHTTP("GET /late", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})); err == nil {
-		t.Fatal("late route accepted")
-	}
 	grpcAddr, httpAddr := app.Addresses()
 	client := &http.Client{Timeout: time.Second}
 	for path, want := range map[string]int{"/healthz": 404, "/readyz": 404, "/livez": 404, "/v1/users/123": 200} {
@@ -109,20 +108,65 @@ func TestReadyHookFailureCleansUp(t *testing.T) {
 		t.Run(map[bool]string{false: "error", true: "panic"}[panics], func(t *testing.T) {
 			options := probeOptions()
 			var order []string
+			var app *koala.App
+			var connection net.Conn
+			request := func() error {
+				if _, err := io.WriteString(connection, "GET /missing HTTP/1.1\r\nHost: localhost\r\n\r\n"); err != nil {
+					return err
+				}
+				response, err := http.ReadResponse(bufio.NewReader(connection), nil)
+				if err != nil {
+					return err
+				}
+				_, readError := io.Copy(io.Discard, response.Body)
+				if err := errors.Join(readError, response.Body.Close()); err != nil {
+					return err
+				}
+				if response.Close {
+					return errors.New("server unexpectedly disabled keep-alive")
+				}
+				return nil
+			}
 			options.OnReady = func(context.Context) error {
+				// Complete a request before failing startup so this is an accepted
+				// keep-alive connection, not just a pending TCP connection.
+				_, address := app.Addresses()
+				var err error
+				connection, err = net.DialTimeout("tcp", address, time.Second)
+				if err != nil {
+					return err
+				}
+				t.Cleanup(func() { connection.Close() })
+				if err := connection.SetDeadline(time.Now().Add(time.Second)); err != nil {
+					return err
+				}
+				if err := request(); err != nil {
+					return err
+				}
 				if panics {
 					panic("private")
 				}
 				return errors.New("ready failed")
 			}
 			options.OnShutdown = func(ctx context.Context) error {
+				if app.IsReady() {
+					t.Error("readiness must stop before shutdown hook")
+				}
+				// Startup failure uses the same hook-before-transports order as
+				// normal shutdown. The accepted connection is still usable here.
+				if connection != nil {
+					if err := request(); err != nil {
+						t.Errorf("HTTP closed before shutdown hook: %v", err)
+					}
+				}
 				if _, ok := ctx.Deadline(); !ok {
 					t.Error("shutdown budget missing")
 				}
 				order = append(order, "shutdown")
 				return errors.New("shutdown failed")
 			}
-			app, err := koala.New(testConfig().Server, withRequests(options))
+			var err error
+			app, err = koala.New(testConfig().Server, withRequests(options))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -134,6 +178,15 @@ func TestReadyHookFailureCleansUp(t *testing.T) {
 			}
 			if panics && (!strings.Contains(err.Error(), "TestReadyHookFailureCleansUp") || strings.Contains(err.Error(), "private")) {
 				t.Fatal("startup panic lost its stack or exposed its value", err)
+			}
+			if err := connection.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+				t.Fatal(err)
+			}
+			var buffer [1]byte
+			_, connectionError := connection.Read(buffer[:])
+			var networkError net.Error
+			if connectionError == nil || (errors.As(connectionError, &networkError) && networkError.Timeout()) {
+				t.Fatalf("accepted HTTP connection survived Run: %v", connectionError)
 			}
 			if strings.Join(order, ",") != "shutdown" {
 				t.Fatal(order)

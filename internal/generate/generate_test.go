@@ -19,13 +19,13 @@ func TestDescriptorScopeAndStreaming(t *testing.T) {
 	app := &descriptorpb.FileDescriptorProto{Name: proto.String("user/v1/user.proto"), Package: proto.String("user.v1"), Options: &descriptorpb.FileOptions{GoPackage: proto.String("example.com/app/gen/go/user/v1;userv1")}, Service: []*descriptorpb.ServiceDescriptorProto{{Name: proto.String("UserService"), Method: []*descriptorpb.MethodDescriptorProto{{Name: proto.String("Get")}}}}}
 	dependency := &descriptorpb.FileDescriptorProto{Name: proto.String("dependency.proto"), Service: []*descriptorpb.ServiceDescriptorProto{{Name: proto.String("MustNotHost")}}}
 	bytes, _ := proto.Marshal(&descriptorpb.FileDescriptorSet{File: []*descriptorpb.FileDescriptorProto{app, dependency}})
-	services, e := servicesFrom(root, Config{ProtoRoot: "proto"}, bytes)
+	services, e := servicesFrom(root, Config{}, bytes)
 	if e != nil || len(services) != 1 {
 		t.Fatalf("scope %v %v", services, e)
 	}
 	app.Service[0].Method[0].ServerStreaming = proto.Bool(true)
 	bytes, _ = proto.Marshal(&descriptorpb.FileDescriptorSet{File: []*descriptorpb.FileDescriptorProto{app}})
-	if _, e = servicesFrom(root, Config{ProtoRoot: "proto"}, bytes); e == nil {
+	if _, e = servicesFrom(root, Config{}, bytes); e == nil {
 		t.Fatal("streaming accepted")
 	}
 }
@@ -35,12 +35,15 @@ func TestOwnershipAndSymlinks(t *testing.T) {
 	p := "gen/go/hand.go"
 	os.MkdirAll(filepath.Join(root, "gen/go"), 0700)
 	os.WriteFile(filepath.Join(root, p), []byte("package hand\n"), 0600)
-	if e := newOutputTransaction(root).writeOwned(p, []byte(header+"package generated\n"), manifest{}); e == nil {
+	if e := newOutputTransaction(root).writeOutputs(map[string][]byte{p: []byte(header + "package generated\n")}, manifest{}); e == nil {
 		t.Fatal("handwritten source overwritten")
 	}
 	previous := manifest{Outputs: map[string]string{p: hash([]byte("old content"))}}
-	if e := newOutputTransaction(root).install(map[string][]byte{}, previous); e == nil {
-		t.Fatal("modified owned source deleted")
+	if e := newOutputTransaction(root).install(map[string][]byte{}, previous); e != nil {
+		t.Fatal("modified obsolete output was not removed", e)
+	}
+	if _, err := os.Stat(filepath.Join(root, p)); !os.IsNotExist(err) {
+		t.Fatal("obsolete output still exists", err)
 	}
 	if e := os.Symlink(t.TempDir(), filepath.Join(root, "proto")); e != nil {
 		t.Fatal(e)
@@ -52,7 +55,6 @@ func TestOwnershipAndSymlinks(t *testing.T) {
 
 func TestRegistryIsDeterministic(t *testing.T) {
 	c := Config{DependencyType: "example.com/app/internal/deps.Dependencies"}
-	c.Registry.Package = "bootstrap"
 	services := []service{{Name: "user.v1.UserService", GoName: "UserService", Import: "example.com/app/gen/go/user/v1", FileSymbol: "File_user_v1_user_proto", Factory: factory{Import: "example.com/app/internal/service/user", Name: "New"}}}
 	first, e := registrySource(c, services, "example.com/app/gen/openapi")
 	if e != nil {

@@ -110,18 +110,6 @@ func newTestApp(t *testing.T, c config.Config, o koala.Options) (*koala.App, err
 	if err != nil {
 		return nil, err
 	}
-	if err := app.HandleHTTP("GET /livez", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })); err != nil {
-		return nil, err
-	}
-	if err := app.HandleHTTP("GET /readyz", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !app.IsReady() {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-	})); err != nil {
-		return nil, err
-	}
 	return app, nil
 }
 
@@ -208,7 +196,7 @@ func TestTransportPoliciesAndDocs(t *testing.T) {
 	for _, tt := range []struct {
 		method, path, body string
 		code               int
-	}{{"POST", "/v1/users", `{"name":"Ada","email":"ada@example.com"}`, 200}, {"POST", "/v1/users", `{"name":""}`, 400}, {"GET", "/v1/users/1", "", 200}, {"GET", "/v1/users/wait", "", 504}, {"GET", "/v1/users/panic", "", 500}, {"GET", "/readyz", "", 200}, {"GET", "/openapi.json", "", 200}, {"GET", "/docs", "", 200}} {
+	}{{"POST", "/v1/users", `{"name":"Ada","email":"ada@example.com"}`, 200}, {"POST", "/v1/users", `{"name":""}`, 400}, {"GET", "/v1/users/1", "", 200}, {"GET", "/v1/users/wait", "", 504}, {"GET", "/v1/users/panic", "", 500}, {"GET", "/openapi.json", "", 200}, {"GET", "/docs", "", 200}} {
 		t.Run(tt.method+" "+tt.path, func(t *testing.T) {
 			req, _ := http.NewRequest(tt.method, base+tt.path, strings.NewReader(tt.body))
 			req.Header.Set("Content-Type", "application/json")

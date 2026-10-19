@@ -7,12 +7,15 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"fmt"
 	"io"
 	"math/big"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -239,6 +242,110 @@ func TestAuthenticationHookContexts(t *testing.T) {
 			_, err := userv1.NewUserServiceClient(conn).GetUser(ctx, &userv1.GetUserRequest{Id: tt.id})
 			if status.Code(err) != tt.want {
 				t.Fatalf("got %v, want %s", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestShutdownDrainsHTTPBeforeGRPC(t *testing.T) {
+	for _, cause := range []string{"cancellation", "HTTP listener failure", "gRPC listener failure"} {
+		t.Run(cause, func(t *testing.T) {
+			entered := make(chan struct{})
+			release := make(chan struct{})
+			shuttingDown := make(chan struct{})
+			var releaseOnce sync.Once
+			finishRequest := func() { releaseOnce.Do(func() { close(release) }) }
+			defer finishRequest()
+			var listeners []net.Listener
+			var app *koala.App
+			var err error
+			app, err = newTestApp(t, testConfig(), koala.Options{
+				Listen: func(network, address string) (net.Listener, error) {
+					listener, err := net.Listen(network, address)
+					listeners = append(listeners, listener)
+					return listener, err
+				},
+				Authenticate: func(ctx context.Context, method string) (context.Context, error) {
+					close(entered)
+					select {
+					case <-release:
+						return ctx, nil
+					case <-ctx.Done():
+						return ctx, ctx.Err()
+					}
+				},
+				OnShutdown: func(context.Context) error {
+					if app.IsReady() {
+						t.Error("readiness must stop before shutdown hook")
+					}
+					close(shuttingDown)
+					return nil
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := app.Register(registration()); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			done := make(chan error, 1)
+			go func() { done <- app.Run(ctx) }()
+			select {
+			case <-app.Ready():
+			case err := <-done:
+				t.Fatal(err)
+			case <-time.After(5 * time.Second):
+				t.Fatal("startup timeout")
+			}
+			_, address := app.Addresses()
+			response := make(chan error, 1)
+			go func() {
+				client := &http.Client{Timeout: 3 * time.Second}
+				defer client.CloseIdleConnections()
+				resp, err := client.Get("http://" + address + "/v1/users/1")
+				if err == nil {
+					_, err = io.Copy(io.Discard, resp.Body)
+					resp.Body.Close()
+					if resp.StatusCode != http.StatusOK {
+						err = fmt.Errorf("HTTP status %d", resp.StatusCode)
+					}
+				}
+				response <- err
+			}()
+			select {
+			case <-entered:
+			case <-time.After(3 * time.Second):
+				t.Fatal("request did not enter gRPC")
+			}
+			switch cause {
+			case "cancellation":
+				cancel()
+			case "HTTP listener failure":
+				listeners[1].Close()
+			case "gRPC listener failure":
+				listeners[0].Close()
+			}
+			select {
+			case <-shuttingDown:
+			case <-time.After(3 * time.Second):
+				t.Fatal("shutdown hook not called")
+			}
+			finishRequest()
+			if err := <-response; err != nil {
+				t.Fatalf("in-flight HTTP request failed during draining: %v", err)
+			}
+			select {
+			case err := <-done:
+				if cause == "cancellation" && err != nil {
+					t.Fatal(err)
+				}
+				if cause != "cancellation" && (err == nil || !strings.Contains(err.Error(), "serving failed")) {
+					t.Fatalf("listener failure lost: %v", err)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("shutdown did not finish")
 			}
 		})
 	}
