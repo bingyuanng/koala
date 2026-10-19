@@ -1,10 +1,12 @@
 package koala
 
 import (
+	"bytes"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/bingyuanng/koala/observability"
@@ -57,6 +59,41 @@ func TestApplicationRouteConflictsWithDocs(t *testing.T) {
 			}
 			if _, err := app.httpHandler(nil, nil); err == nil {
 				t.Fatal("conflicting documentation route accepted")
+			}
+		})
+	}
+}
+
+func TestHTTPPanicDiagnostics(t *testing.T) {
+	for _, completion := range []bool{false, true} {
+		name := "application route"
+		if completion {
+			name = "completion wrapper"
+		}
+		t.Run(name, func(t *testing.T) {
+			app := probeTestApp(t)
+			var logs bytes.Buffer
+			app.logger = slog.New(slog.NewJSONHandler(&logs, nil))
+			var handler http.Handler = http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("private secret") })
+			if completion {
+				handler = app.httpCompletion("GET /panic", handler)
+			} else {
+				if err := app.HandleHTTP("GET /panic", handler); err != nil {
+					t.Fatal(err)
+				}
+				var err error
+				handler, err = app.httpHandler(nil, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, httptest.NewRequest("GET", "/panic", nil))
+			if response.Code != 500 || strings.Contains(response.Body.String(), "private secret") {
+				t.Fatalf("panic response: %d %s", response.Code, response.Body.String())
+			}
+			if !strings.Contains(logs.String(), `"stack":`) || !strings.Contains(logs.String(), "TestHTTPPanicDiagnostics") || strings.Contains(logs.String(), "private secret") {
+				t.Fatalf("missing diagnostics or exposed panic value: %s", logs.String())
 			}
 		})
 	}

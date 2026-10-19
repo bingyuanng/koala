@@ -20,6 +20,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bingyuanng/koala/tools"
+	"golang.org/x/mod/modfile"
 	"golang.org/x/tools/go/packages"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/descriptorpb"
@@ -74,14 +76,14 @@ func command(ctx context.Context, root string, out io.Writer, name string, args 
 	}
 }
 
-func bufBinary(explicit string) (string, error) {
+func bufBinary(explicit, version string) (string, error) {
 	if explicit != "" {
 		p, e := filepath.Abs(explicit)
 		return p, e
 	}
 	p, e := exec.LookPath("buf")
 	if e != nil {
-		return "", fmt.Errorf("Buf 1.73.0 is required; install it or pass --buf /path/to/buf")
+		return "", fmt.Errorf("Buf %s is required; install it or pass --buf /path/to/buf", version)
 	}
 	return p, nil
 }
@@ -89,7 +91,7 @@ func bufBinary(explicit string) (string, error) {
 // Run only writes a registry after descriptors, factory signatures and concrete
 // interface compatibility pass. Buf output is staged separately. Existing
 // application shells are never overwritten.
-func Run(ctx context.Context, root string, o Options) error {
+func Run(ctx context.Context, root string, o Options) (result error) {
 	if o.Output == nil {
 		o.Output = io.Discard
 	}
@@ -100,19 +102,30 @@ func Run(ctx context.Context, root string, o Options) error {
 	if e = rejectSymlinks(root, []string{"proto", "gen", "internal/service", "internal/bootstrap", ".koala"}); e != nil {
 		return e
 	}
+	outputsTxn := newOutputTransaction(root)
+	committed := false
+	defer func() {
+		if !committed {
+			result = errors.Join(result, outputsTxn.rollback())
+		}
+	}()
 	sources, e := protoSources(root, cfg)
 	if e != nil {
 		return e
 	}
 	var buf string
+	pinned, e := tools.ReadVersions()
+	if e != nil {
+		return fmt.Errorf("invalid embedded tool versions: %w", e)
+	}
 	if len(sources) > 0 {
-		buf, e = bufBinary(o.Buf)
+		buf, e = bufBinary(o.Buf, pinned.Buf)
 		if e != nil {
 			return e
 		}
 		version, err := exec.CommandContext(ctx, buf, "--version").Output()
-		if err != nil || strings.TrimSpace(string(version)) != "1.73.0" {
-			return fmt.Errorf("Buf version mismatch: expected 1.73.0")
+		if err != nil || strings.TrimSpace(string(version)) != pinned.Buf {
+			return fmt.Errorf("Buf version mismatch: expected %s", pinned.Buf)
 		}
 	}
 	stage, e := os.MkdirTemp("", "koala-gen-")
@@ -161,10 +174,10 @@ func Run(ctx context.Context, root string, o Options) error {
 		fmt.Fprintln(o.Output, "Reusing verified transport artifacts for unchanged contracts")
 	} else if len(sources) == 0 {
 		outputs = map[string][]byte{}
-		if e = installOutputs(root, outputs, previous); e != nil {
+		if e = outputsTxn.install(outputs, previous); e != nil {
 			return e
 		}
-		fmt.Fprintln(o.Output, "No protobuf contracts; generating a health-only application")
+		fmt.Fprintln(o.Output, "No protobuf contracts; generating an empty registry")
 	} else {
 		if e = command(ctx, root, o.Output, buf, "lint"); e != nil {
 			return e
@@ -178,7 +191,7 @@ func Run(ctx context.Context, root string, o Options) error {
 		}
 		args := []string{"generate", "--output", stage}
 		if o.LocalPlugins != "" {
-			template, e := localTemplate(root, o.LocalPlugins, stage)
+			template, e := localTemplate(root, o.LocalPlugins, stage, pinned)
 			if e != nil {
 				return e
 			}
@@ -196,8 +209,8 @@ func Run(ctx context.Context, root string, o Options) error {
 				return e
 			}
 		}
-		if e = installOutputs(root, outputs, previous); e != nil {
-			return fmt.Errorf("transport output update failed; some transport files may have changed: %w", e)
+		if e = outputsTxn.install(outputs, previous); e != nil {
+			return fmt.Errorf("transport output update failed: %w", e)
 		}
 	}
 	services, e := servicesFrom(root, cfg, descriptors)
@@ -257,7 +270,7 @@ func Run(ctx context.Context, root string, o Options) error {
 		openAPIImport = module + "/gen/openapi"
 		embedSource := []byte(header + "package openapi\n\nimport _ \"embed\"\n\n//go:embed api.swagger.json\nvar Document []byte\n")
 		outputs["gen/openapi/openapi_gen.go"] = embedSource
-		if e = writeOwned(root, "gen/openapi/openapi_gen.go", embedSource, previous); e != nil {
+		if e = outputsTxn.writeOwned("gen/openapi/openapi_gen.go", embedSource, previous); e != nil {
 			return e
 		}
 	}
@@ -267,14 +280,14 @@ func Run(ctx context.Context, root string, o Options) error {
 	}
 	outputs[cfg.Registry.Output] = registry
 	outputs[".koala/descriptors.bin"] = descriptors
-	if e = atomicWrite(filepath.Join(root, ".koala/descriptors.bin"), descriptors); e != nil {
+	if e = outputsTxn.writeOwned(".koala/descriptors.bin", descriptors, previous); e != nil {
 		return e
 	}
-	if e = writeOwned(root, cfg.Registry.Output, registry, previous); e != nil {
+	if e = outputsTxn.writeOwned(cfg.Registry.Output, registry, previous); e != nil {
 		return e
 	}
 	if e = command(ctx, root, o.Output, "go", "build", "-mod=mod", "./internal/bootstrap"); e != nil {
-		return fmt.Errorf("registry was emitted but its consumer build failed: %w", e)
+		return fmt.Errorf("generated registry failed its consumer build: %w", e)
 	}
 	input, e := inputHash(ctx, root, cfg, services)
 	if e != nil {
@@ -285,9 +298,10 @@ func Run(ctx context.Context, root string, o Options) error {
 		m.Outputs[path] = hash(b)
 	}
 	b, _ := json.MarshalIndent(m, "", "  ")
-	if e = atomicWrite(filepath.Join(root, manifestPath), append(b, '\n')); e != nil {
+	if e = outputsTxn.write(manifestPath, append(b, '\n')); e != nil {
 		return e
 	}
+	committed = true
 	fmt.Fprintln(o.Output, "Generated service registry and freshness manifest")
 	return nil
 }
@@ -342,23 +356,33 @@ func servicesFrom(root string, cfg Config, b []byte) ([]service, error) {
 
 // ApplicationImportPath resolves a project inside a standalone module or monorepo.
 func ApplicationImportPath(root string) (string, error) {
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
 	current := root
 	for {
 		b, e := os.ReadFile(filepath.Join(current, "go.mod"))
 		if e == nil {
-			m := regexp.MustCompile(`(?m)^module\s+(\S+)`).FindSubmatch(b)
-			if len(m) != 2 {
+			m, err := modfile.Parse(filepath.Join(current, "go.mod"), b, nil)
+			if err != nil {
+				return "", err
+			}
+			if m.Module == nil {
 				return "", errors.New("go.mod has no module directive")
 			}
 			rel, e := filepath.Rel(current, root)
 			if e != nil {
 				return "", e
 			}
-			name := string(m[1])
+			name := m.Module.Mod.Path
 			if rel != "." {
 				name += "/" + filepath.ToSlash(rel)
 			}
 			return name, nil
+		}
+		if !os.IsNotExist(e) {
+			return "", e
 		}
 		parent := filepath.Dir(current)
 		if parent == current {
@@ -612,7 +636,15 @@ func contractHash(root string, c Config) (string, error) {
 	files := append([]string{"koala.yaml", "buf.yaml", "buf.lock", "buf.gen.yaml"}, sources...)
 	sort.Strings(files)
 	h := sha256.New()
-	fmt.Fprintln(h, module, "koala-generator-v1;buf=1.73.0")
+	pinned, e := tools.ReadVersions()
+	if e != nil {
+		return "", e
+	}
+	versions, e := json.Marshal(pinned)
+	if e != nil {
+		return "", e
+	}
+	fmt.Fprintln(h, module, "koala-generator-v2", hash(versions))
 	for _, p := range files {
 		b, e := os.ReadFile(filepath.Join(root, p))
 		if e != nil {
@@ -732,46 +764,6 @@ func generatedFiles(root string) (map[string][]byte, error) {
 		return nil
 	})
 	return files, e
-}
-func writeOwned(root, path string, b []byte, previous manifest) error {
-	dest := filepath.Join(root, filepath.FromSlash(path))
-	if old, e := os.ReadFile(dest); e == nil {
-		if oldHash, ok := previous.Outputs[path]; ok {
-			if hash(old) != oldHash {
-				return fmt.Errorf("refusing to overwrite modified generated output %s", path)
-			}
-		} else if strings.HasSuffix(path, ".go") && !bytes.HasPrefix(old, []byte("// Code generated")) {
-			return fmt.Errorf("refusing to overwrite application source %s", path)
-		} else if strings.HasSuffix(path, ".json") && !bytes.Equal(old, b) {
-			return fmt.Errorf("unowned output %s", path)
-		}
-	}
-	return atomicWrite(dest, b)
-}
-func installOutputs(root string, outputs map[string][]byte, previous manifest) error {
-	for p, b := range outputs {
-		if e := writeOwned(root, p, b, previous); e != nil {
-			return e
-		}
-	}
-	for p, want := range previous.Outputs {
-		if !strings.HasPrefix(p, "gen/") {
-			continue
-		}
-		if _, ok := outputs[p]; !ok {
-			b, e := os.ReadFile(filepath.Join(root, p))
-			if os.IsNotExist(e) {
-				continue
-			}
-			if e != nil || hash(b) != want {
-				return fmt.Errorf("refusing to remove modified generated output %s", p)
-			}
-			if e = os.Remove(filepath.Join(root, p)); e != nil {
-				return e
-			}
-		}
-	}
-	return nil
 }
 func atomicWrite(path string, b []byte) error {
 	if e := os.MkdirAll(filepath.Dir(path), 0755); e != nil {

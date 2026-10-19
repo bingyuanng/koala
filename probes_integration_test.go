@@ -132,6 +132,9 @@ func TestReadyHookFailureCleansUp(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "ready") || !strings.Contains(err.Error(), "shutdown failed") {
 				t.Fatal(err)
 			}
+			if panics && (!strings.Contains(err.Error(), "TestReadyHookFailureCleansUp") || strings.Contains(err.Error(), "private")) {
+				t.Fatal("startup panic lost its stack or exposed its value", err)
+			}
 			if strings.Join(order, ",") != "shutdown" {
 				t.Fatal(order)
 			}

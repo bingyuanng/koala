@@ -137,26 +137,59 @@ func TestFrameworkValidation(t *testing.T) {
 }
 
 func TestAggregateOverrideSemantics(t *testing.T) {
+	type item struct {
+		Name    string `json:"name"`
+		Enabled bool   `json:"enabled"`
+	}
 	type settings struct {
 		Object struct {
-			Name    string `json:"name"`
-			Enabled bool   `json:"enabled"`
+			Name   string            `json:"name"`
+			Values map[string]string `json:"values"`
 		} `json:"object"`
 		Values map[string]string `json:"values"`
-		List   []string          `json:"list"`
+		List   []item            `json:"list"`
+		Fixed  [2]item           `json:"fixed"`
 	}
 	defaults := func() settings {
-		c := settings{Values: map[string]string{"old": "value"}, List: []string{"old"}}
+		c := settings{Values: map[string]string{"old": "value"}, List: []item{{Name: "old", Enabled: true}}}
+		c.Fixed = [2]item{{Name: "old", Enabled: true}, {Name: "old", Enabled: true}}
 		c.Object.Name = "default"
-		c.Object.Enabled = true
+		c.Object.Values = map[string]string{"old": "value"}
 		return c
 	}
-	c, e := LoadWithOptions(Options[settings]{Defaults: defaults, Environment: "prod", Env: []string{`KOALA_OBJECT={"enabled":false}`, `KOALA_VALUES={"new":"001"}`, `KOALA_LIST=["first","second"]`}, Required: []string{"object.enabled"}})
-	if e != nil {
-		t.Fatal(e)
-	}
-	if c.Object.Name != "default" || c.Object.Enabled || len(c.Values) != 1 || c.Values["new"] != "001" || len(c.List) != 2 {
-		t.Fatalf("aggregate semantics %#v", c)
+	for _, tt := range []struct {
+		name, file string
+		env        []string
+		want       map[string]string
+	}{
+		{"file replacement", `{"object":{"values":{"new":"001"}},"values":{"new":"001"},"list":[{"name":"new"}],"fixed":[{"name":"new"}]}`, nil, map[string]string{"new": "001"}},
+		{"file empty maps", `{"object":{"values":{}},"values":{},"list":[{"name":"new"}],"fixed":[{"name":"new"}]}`, nil, map[string]string{}},
+		{"environment sections", "", []string{`KOALA_OBJECT={"values":{"new":"001"}}`, `KOALA_VALUES={"new":"001"}`, `KOALA_LIST=[{"name":"new"}]`, `KOALA_FIXED=[{"name":"new"}]`}, map[string]string{"new": "001"}},
+		{"environment empty maps", "", []string{`KOALA_OBJECT={"values":{}}`, `KOALA_VALUES={}`, `KOALA_LIST=[{"name":"new"}]`, `KOALA_FIXED=[{"name":"new"}]`}, map[string]string{}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			options := Options[settings]{Defaults: defaults, Env: tt.env}
+			if options.Env == nil {
+				options.Env = []string{}
+			}
+			var got settings
+			var err error
+			if tt.file != "" {
+				file := filepath.Join(t.TempDir(), "config.json")
+				if err := os.WriteFile(file, []byte(tt.file), 0600); err != nil {
+					t.Fatal(err)
+				}
+				got, err = LoadFile(file, options)
+			} else {
+				got, err = LoadEnv(options)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Object.Name != "default" || !reflect.DeepEqual(got.Object.Values, tt.want) || !reflect.DeepEqual(got.Values, tt.want) || !reflect.DeepEqual(got.List, []item{{Name: "new"}}) || got.Fixed != [2]item{{Name: "new"}, {}} {
+				t.Fatalf("aggregate replacement retained default entries or lost omitted fields: %#v", got)
+			}
+		})
 	}
 }
 

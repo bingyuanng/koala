@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -270,13 +271,13 @@ func (a *App) Run(ctx context.Context) (result error) {
 			host = "127.0.0.1"
 		}
 		target = net.JoinHostPort(host, port)
-		opts := append(telemetry.ClientOptions(), grpc.WithTransportCredentials(dialCredentials), grpc.WithChainUnaryInterceptor(a.clientDeadline()))
+		opts := append(telemetry.ClientOptions(), grpc.WithTransportCredentials(dialCredentials), grpc.WithChainUnaryInterceptor(a.gatewayInterceptor()))
 		conn, err = grpc.NewClient(target, opts...)
 		if err != nil {
 			return fmt.Errorf("koala: gateway client: %w", err)
 		}
 		defer conn.Close()
-		gateway := runtime.NewServeMux(runtime.WithIncomingHeaderMatcher(func(key string) (string, bool) {
+		gateway := runtime.NewServeMux(runtime.WithErrorHandler(gatewayErrorHandler), runtime.WithIncomingHeaderMatcher(func(key string) (string, bool) {
 			switch strings.ToLower(key) {
 			case "x-request-id":
 				return strings.ToLower(key), true
@@ -356,8 +357,8 @@ func (a *App) Run(ctx context.Context) (result error) {
 }
 func registerServices(s *grpc.Server, rs []Registration, extra func(*grpc.Server) error) (err error) {
 	defer func() {
-		if recover() != nil {
-			err = errors.New("koala: service registration failed")
+		if recovered := recover(); recovered != nil {
+			err = panicError("service registration", recovered)
 		}
 	}()
 	for _, r := range rs {
@@ -374,8 +375,8 @@ func invokeLifecycleHook(stage string, ctx context.Context, hook func(context.Co
 		return nil
 	}
 	defer func() {
-		if recover() != nil {
-			err = fmt.Errorf("koala: %s hook panicked", stage)
+		if recovered := recover(); recovered != nil {
+			err = panicError(stage+" hook", recovered)
 		}
 	}()
 	return hook(ctx)
@@ -427,13 +428,7 @@ func (a *App) httpHandler(gateway http.Handler, p *observability.Providers) (htt
 					return nil, fmt.Errorf("koala: HTTP path templates with wildcards are unsupported: %s", rpc)
 				}
 				pattern := verb + " " + path
-				handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					ctx, cancel := a.deadline(r.Context(), rpc)
-					defer cancel()
-					r = r.WithContext(ctx)
-					r.Body = http.MaxBytesReader(w, r.Body, a.server.HTTP.MaxBodyBytes)
-					gateway.ServeHTTP(w, r)
-				})
+				handler := a.gatewayHandler(rpc, gateway)
 				if err := handleRoute(mux, pattern, p.HTTPHandler(otelRoute(pattern, a.httpCompletion(pattern, handler)))); err != nil {
 					return nil, err
 				}
@@ -444,8 +439,8 @@ func (a *App) httpHandler(gateway http.Handler, p *observability.Providers) (htt
 }
 func handleRoute(m *http.ServeMux, p string, h http.Handler) (err error) {
 	defer func() {
-		if recover() != nil {
-			err = fmt.Errorf("koala: conflicting HTTP route %s", p)
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("koala: conflicting HTTP route %s: %w", p, panicError("HTTP route registration", recovered))
 		}
 	}()
 	m.Handle(p, h)
@@ -492,9 +487,13 @@ func httpBinding(r *annotations.HttpRule) (string, string) {
 
 func registerGateway(ctx context.Context, r Registration, m *runtime.ServeMux, c *grpc.ClientConn) (err error) {
 	defer func() {
-		if recover() != nil {
-			err = errors.New("koala: gateway registration failed")
+		if recovered := recover(); recovered != nil {
+			err = panicError("gateway registration", recovered)
 		}
 	}()
 	return r.Gateway(ctx, m, c)
+}
+
+func panicError(stage string, recovered any) error {
+	return fmt.Errorf("koala: %s panicked (%T)\n%s", stage, recovered, debug.Stack())
 }

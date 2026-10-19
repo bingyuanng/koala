@@ -2,7 +2,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -10,6 +9,7 @@ import (
 	"strings"
 
 	s "github.com/bingyuanng/koala/scripts/internal/scriptutil"
+	"github.com/bingyuanng/koala/tools"
 )
 
 func main() { s.Main(checkGeneration) }
@@ -29,10 +29,8 @@ func checkGeneration() {
 		pluginDir, err := filepath.Abs(*plugins)
 		s.Must(err)
 		template := s.Read(filepath.Join(fixture, "buf.gen.yaml"))
-		var contract struct {
-			Plugins map[string]string `json:"plugins"`
-		}
-		s.Must(json.Unmarshal([]byte(s.Read(filepath.Join(root, "tools/versions.json"))), &contract))
+		contract, err := tools.ReadVersions()
+		s.Must(err)
 		for _, plugin := range [][3]string{
 			{"protocolbuffers/go", "protoc-gen-go", "google.golang.org/protobuf"},
 			{"grpc/go", "protoc-gen-go-grpc", "google.golang.org/grpc/cmd/protoc-gen-go-grpc"},

@@ -34,11 +34,11 @@ func TestOwnershipAndSymlinks(t *testing.T) {
 	p := "gen/go/hand.go"
 	os.MkdirAll(filepath.Join(root, "gen/go"), 0700)
 	os.WriteFile(filepath.Join(root, p), []byte("package hand\n"), 0600)
-	if e := writeOwned(root, p, []byte(header+"package generated\n"), manifest{}); e == nil {
+	if e := newOutputTransaction(root).writeOwned(p, []byte(header+"package generated\n"), manifest{}); e == nil {
 		t.Fatal("handwritten source overwritten")
 	}
 	previous := manifest{Outputs: map[string]string{p: hash([]byte("old content"))}}
-	if e := installOutputs(root, map[string][]byte{}, previous); e == nil {
+	if e := newOutputTransaction(root).install(map[string][]byte{}, previous); e == nil {
 		t.Fatal("modified owned source deleted")
 	}
 	if e := os.Symlink(t.TempDir(), filepath.Join(root, "proto")); e != nil {

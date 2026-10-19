@@ -238,6 +238,7 @@ func decode(raw []byte, dst any, present map[string]bool, path string) error {
 	}
 	d = json.NewDecoder(bytes.NewReader(raw))
 	d.DisallowUnknownFields()
+	resetAggregates(reflect.ValueOf(dst).Elem(), raw)
 	if err := d.Decode(dst); err != nil {
 		var mismatch *json.UnmarshalTypeError
 		if errors.As(err, &mismatch) {
@@ -259,6 +260,48 @@ func decode(raw []byte, dst any, present map[string]bool, path string) error {
 		return fmt.Errorf("config: invalid JSON at %s", scope)
 	}
 	return nil
+}
+
+// Struct fields retain omitted defaults. Supplied maps, slices and arrays start
+// empty so JSON decoding cannot merge map entries or reuse default elements.
+func resetAggregates(value reflect.Value, raw json.RawMessage) {
+	for value.Kind() == reflect.Pointer {
+		if value.IsNil() {
+			return
+		}
+		value = value.Elem()
+	}
+	switch value.Kind() {
+	case reflect.Map, reflect.Slice, reflect.Array:
+		value.SetZero()
+	case reflect.Struct:
+		var object map[string]json.RawMessage
+		if json.Unmarshal(raw, &object) != nil {
+			return // The typed decoder reports incompatible input.
+		}
+		for i := 0; i < value.NumField(); i++ {
+			field := value.Type().Field(i)
+			name := strings.Split(field.Tag.Get("json"), ",")[0]
+			if !field.IsExported() || name == "-" {
+				continue
+			}
+			if name == "" {
+				name = field.Name
+			}
+			child, exists := object[name]
+			if !exists {
+				for key, candidate := range object {
+					if strings.EqualFold(key, name) {
+						child, exists = candidate, true
+						break
+					}
+				}
+			}
+			if exists {
+				resetAggregates(value.Field(i), child)
+			}
+		}
+	}
 }
 func scanJSON(d *json.Decoder, present map[string]bool, path string) error {
 	token, err := d.Token()

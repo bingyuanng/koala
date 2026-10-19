@@ -3,8 +3,10 @@ package koala
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -33,7 +35,7 @@ func (a *App) deadline(ctx context.Context, method string) (context.Context, con
 	}
 	return context.WithTimeout(ctx, budget)
 }
-func (a *App) clientDeadline() grpc.UnaryClientInterceptor {
+func (a *App) gatewayInterceptor() grpc.UnaryClientInterceptor {
 	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 		ctx, cancel := a.deadline(ctx, method)
 		defer cancel()
@@ -62,7 +64,8 @@ func (a *App) interceptor(v protovalidate.Validator, p *observability.Providers)
 		requestContext := ctx
 		defer cancel()
 		defer func() {
-			if recover() != nil {
+			if recovered := recover(); recovered != nil {
+				a.logPanic(ctx, "grpc", info.FullMethod, recovered)
 				panics.Add(ctx, 1, metric.WithAttributes(attribute.String("rpc.method", info.FullMethod)))
 				err = status.Error(codes.Internal, "internal server error")
 			}
@@ -73,7 +76,7 @@ func (a *App) interceptor(v protovalidate.Validator, p *observability.Providers)
 				if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 					err = status.FromContextError(err).Err()
 				} else if _, ok := status.FromError(err); !ok {
-					a.logger.ErrorContext(ctx, "application request failed", "method", info.FullMethod)
+					a.logger.ErrorContext(ctx, "application request failed", "method", info.FullMethod, "error", err)
 					err = status.Error(codes.Internal, "internal server error")
 				}
 			}
@@ -168,7 +171,8 @@ func (a *App) httpCompletion(pattern string, next http.Handler) http.Handler {
 			w.Header().Set("X-Trace-Id", sc.TraceID().String())
 		}
 		defer func() {
-			if recover() != nil {
+			if recovered := recover(); recovered != nil {
+				a.logPanic(r.Context(), "http", pattern, recovered)
 				http.Error(rec, "internal server error", 500)
 			}
 			code := rec.status
@@ -183,7 +187,8 @@ func (a *App) httpCompletion(pattern string, next http.Handler) http.Handler {
 func (a *App) corsAndRecovery(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
-			if recover() != nil {
+			if recovered := recover(); recovered != nil {
+				a.logPanic(r.Context(), "http", r.Pattern, recovered)
 				http.Error(w, "internal server error", 500)
 			}
 		}()
@@ -227,3 +232,10 @@ func (a *App) corsAndRecovery(next http.Handler) http.Handler {
 }
 
 var requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
+
+func (a *App) logPanic(ctx context.Context, transport, operation string, recovered any) {
+	// Panic values can contain request data. The type and stack locate the failure
+	// without copying that data into logs or client responses.
+	a.logger.ErrorContext(ctx, "request panicked", "transport", transport, "operation", operation,
+		"panic_type", fmt.Sprintf("%T", recovered), "stack", string(debug.Stack()))
+}
