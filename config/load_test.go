@@ -85,9 +85,13 @@ func TestLoaderRejectsInvalidSourcesWithoutSecrets(t *testing.T) {
 		env, required           []string
 	}{
 		{name: "duplicate", body: `{"database":{"password":"SECRET","password":"SECRET"}}`},
+		{name: "duplicate field spelling", body: `{"database":{"password":"SECRET","PASSWORD":"SECRET"}}`},
 		{name: "unknown", body: `{"unknown":"SECRET"}`},
 		{name: "type", body: `{"database":{"count":"SECRET"}}`},
 		{name: "null", body: `{"database":null}`},
+		{name: "nested null", body: `{"framework":{"requests":{"method_timeouts":{"method":null}}}}`},
+		{name: "trailing JSON", body: `{} {"database":{"password":"SECRET"}}`},
+		{name: "invalid file masked by environment", body: `{"database":{"count":"SECRET"}}`, env: []string{"KOALA_DATABASE__COUNT=9"}},
 		{name: "required", environment: "prod", required: []string{"database.active"}},
 		{name: "env type", environment: "prod", env: []string{"KOALA_DATABASE__COUNT=SECRET"}},
 		{name: "env unknown", environment: "prod", env: []string{"KOALA_UNKNOWN=SECRET"}},

@@ -38,6 +38,7 @@ func Find(start string) (string, error) {
 		dir = parent
 	}
 }
+
 func readConfig(root string) (Config, error) {
 	var c Config
 	f, e := os.Open(filepath.Join(root, "koala.yaml"))
@@ -58,6 +59,7 @@ func readConfig(root string) (Config, error) {
 	}
 	return c, nil
 }
+
 func splitType(s string) (string, string, error) {
 	i := strings.LastIndex(s, ".")
 	if i < 1 || i == len(s)-1 {

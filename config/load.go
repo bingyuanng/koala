@@ -1,11 +1,8 @@
 package config
 
 import (
-	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"os"
 	"reflect"
 	"sort"
@@ -85,11 +82,16 @@ func load[T any](o Options[T], readFile bool) (T, error) {
 	}
 	prefix, env := o.Prefix, o.Env
 	index := map[string]fieldPath{}
-	if err := indexFields(value.Type(), nil, nil, prefix, index, map[reflect.Type]bool{}); err != nil {
+	schema, err := indexFields(value.Type(), nil, prefix, index, map[reflect.Type]bool{})
+	if err != nil {
 		return zero, err
 	}
 	if _, ok := index[prefix+"ENV"]; ok {
 		return zero, fmt.Errorf("config: field collides with reserved environment key")
+	}
+	tree, err := defaultsTree(cfg)
+	if err != nil {
+		return zero, err
 	}
 	present := map[string]bool{}
 	if readFile {
@@ -97,11 +99,19 @@ func load[T any](o Options[T], readFile bool) (T, error) {
 		if file == "" {
 			file = "config.dev.json"
 		}
-		b, err := os.ReadFile(file)
+		raw, err := os.ReadFile(file)
 		if err != nil {
 			return zero, fmt.Errorf("config: cannot read configuration file")
 		}
-		if err = decode(b, &cfg, present, ""); err != nil {
+		source, err := parseJSON(raw, "")
+		if err != nil {
+			return zero, err
+		}
+		if err := decodeTree(source, reflect.New(value.Type()).Interface(), ""); err != nil {
+			return zero, err
+		}
+		tree, err = schema.merge(tree, source, "", present)
+		if err != nil {
 			return zero, err
 		}
 	}
@@ -124,41 +134,46 @@ func load[T any](o Options[T], readFile bool) (T, error) {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	for i, k := range keys {
-		for _, other := range keys[i+1:] {
-			if strings.HasPrefix(other, k+"__") {
-				return zero, fmt.Errorf("config: overlapping settings %s and %s", k, other)
-			}
+	for _, k := range keys {
+		childPrefix := k + "__"
+		i := sort.SearchStrings(keys, childPrefix)
+		if i < len(keys) && strings.HasPrefix(keys[i], childPrefix) {
+			return zero, fmt.Errorf("config: overlapping settings %s and %s", k, keys[i])
 		}
 	}
 	for _, k := range keys {
 		f := index[k]
-		v := configField(value, f.indices)
-		raw := []byte(overrides[k])
-		kind := v.Type()
-		for kind.Kind() == reflect.Pointer {
-			kind = kind.Elem()
-		}
-		if kind.Kind() == reflect.String {
-			raw, _ = json.Marshal(overrides[k])
-		}
-		// Struct objects retain constructor defaults for omitted members; maps and
-		// arrays replace the complete aggregate.
-		fresh := reflect.New(v.Type())
-		if kind.Kind() == reflect.Struct {
-			initial, err := json.Marshal(v.Interface())
+		var source any = overrides[k]
+		if f.schema.kind != reflect.String {
+			source, err = parseJSON([]byte(overrides[k]), f.path)
 			if err != nil {
-				return zero, fmt.Errorf("config: cannot copy defaults at %s", f.path)
-			}
-			if err = json.Unmarshal(initial, fresh.Interface()); err != nil {
-				return zero, fmt.Errorf("config: cannot copy defaults at %s", f.path)
+				return zero, fmt.Errorf("config: %s expects %s", f.path, f.schema.typ)
 			}
 		}
-		if err := decode(raw, fresh.Interface(), present, f.path); err != nil {
-			return zero, fmt.Errorf("config: %s expects %s", f.path, v.Type())
+		// Validate each source before merging so an override cannot hide invalid input.
+		if err := decodeTree(source, reflect.New(f.schema.typ).Interface(), f.path); err != nil {
+			return zero, fmt.Errorf("config: %s expects %s", f.path, f.schema.typ)
 		}
-		v.Set(fresh.Elem())
+		if f.quoted {
+			encoded, err := json.Marshal(source)
+			if err != nil {
+				return zero, fmt.Errorf("config: cannot encode %s", f.path)
+			}
+			source = string(encoded)
+		}
+		for i := len(f.names) - 1; i >= 0; i-- {
+			source = map[string]any{f.names[i]: source}
+		}
+		tree, err = schema.merge(tree, source, "", present)
+		if err != nil {
+			return zero, err
+		}
 	}
+	var resolved T
+	if err := decodeTree(tree, &resolved, ""); err != nil {
+		return zero, err
+	}
+	value.Set(schema.preserveDefaults(value, reflect.ValueOf(resolved), "", present))
 	for _, path := range o.Required {
 		if !present[path] {
 			return zero, fmt.Errorf("config: required setting %s is missing", path)
@@ -170,195 +185,4 @@ func load[T any](o Options[T], readFile bool) (T, error) {
 		}
 	}
 	return cfg, nil
-}
-
-type fieldPath struct {
-	indices []int
-	path    string
-}
-
-func indexFields(t reflect.Type, indices []int, names []string, prefix string, index map[string]fieldPath, seen map[reflect.Type]bool) error {
-	if seen[t] {
-		return fmt.Errorf("config: recursive configuration types are unsupported")
-	}
-	seen[t] = true
-	defer delete(seen, t)
-	for i := 0; i < t.NumField(); i++ {
-		f := t.Field(i)
-		if !f.IsExported() {
-			continue
-		}
-		name := strings.Split(f.Tag.Get("json"), ",")[0]
-		if name == "-" {
-			continue
-		}
-		if name == "" {
-			name = f.Name
-		}
-		if f.Anonymous && strings.Split(f.Tag.Get("json"), ",")[0] == "" {
-			return fmt.Errorf("config: anonymous fields require a named configuration section")
-		}
-		if strings.Contains(name, "__") || strings.ContainsAny(name, ".=") || name == "" {
-			return fmt.Errorf("config: ambiguous JSON field name")
-		}
-		path := append(append([]string{}, names...), name)
-		ix := append(append([]int{}, indices...), i)
-		upper := make([]string, len(path))
-		for i, n := range path {
-			upper[i] = strings.ToUpper(n)
-		}
-		key := prefix + strings.Join(upper, "__")
-		if _, ok := index[key]; ok {
-			return fmt.Errorf("config: environment path collision at %s", key)
-		}
-		index[key] = fieldPath{ix, strings.Join(path, ".")}
-		fieldType := f.Type
-		for fieldType.Kind() == reflect.Pointer {
-			fieldType = fieldType.Elem()
-		}
-		if fieldType.Kind() == reflect.Struct {
-			if err := indexFields(fieldType, ix, path, prefix, index, seen); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-// decode checks duplicate keys before ordinary strict typed decoding. Neither
-// parser errors nor submitted values are included in diagnostics.
-func decode(raw []byte, dst any, present map[string]bool, path string) error {
-	d := json.NewDecoder(bytes.NewReader(raw))
-	d.UseNumber()
-	if err := scanJSON(d, present, path); err != nil {
-		return fmt.Errorf("config: invalid or duplicate JSON at %s", path)
-	}
-	if _, err := d.Token(); err != io.EOF {
-		return fmt.Errorf("config: trailing JSON at %s", path)
-	}
-	d = json.NewDecoder(bytes.NewReader(raw))
-	d.DisallowUnknownFields()
-	resetAggregates(reflect.ValueOf(dst).Elem(), raw)
-	if err := d.Decode(dst); err != nil {
-		var mismatch *json.UnmarshalTypeError
-		if errors.As(err, &mismatch) {
-			field := mismatch.Field
-			if path != "" && field != "" {
-				field = path + "." + field
-			} else if field == "" {
-				field = path
-			}
-			return fmt.Errorf("config: %s expects %s", field, mismatch.Type)
-		}
-		scope := path
-		if scope == "" {
-			scope = "configuration"
-		}
-		if strings.HasPrefix(err.Error(), "json: unknown field ") {
-			return fmt.Errorf("config: %s: %s", scope, err)
-		}
-		return fmt.Errorf("config: invalid JSON at %s", scope)
-	}
-	return nil
-}
-
-// Struct fields retain omitted defaults. Supplied maps, slices and arrays start
-// empty so JSON decoding cannot merge map entries or reuse default elements.
-func resetAggregates(value reflect.Value, raw json.RawMessage) {
-	for value.Kind() == reflect.Pointer {
-		if value.IsNil() {
-			return
-		}
-		value = value.Elem()
-	}
-	switch value.Kind() {
-	case reflect.Map, reflect.Slice, reflect.Array:
-		value.SetZero()
-	case reflect.Struct:
-		var object map[string]json.RawMessage
-		if json.Unmarshal(raw, &object) != nil {
-			return // The typed decoder reports incompatible input.
-		}
-		for i := 0; i < value.NumField(); i++ {
-			field := value.Type().Field(i)
-			name := strings.Split(field.Tag.Get("json"), ",")[0]
-			if !field.IsExported() || name == "-" {
-				continue
-			}
-			if name == "" {
-				name = field.Name
-			}
-			child, exists := object[name]
-			if !exists {
-				for key, candidate := range object {
-					if strings.EqualFold(key, name) {
-						child, exists = candidate, true
-						break
-					}
-				}
-			}
-			if exists {
-				resetAggregates(value.Field(i), child)
-			}
-		}
-	}
-}
-func scanJSON(d *json.Decoder, present map[string]bool, path string) error {
-	token, err := d.Token()
-	if err != nil {
-		return err
-	}
-	if token == nil {
-		return fmt.Errorf("null is not a configuration value")
-	}
-	present[path] = true
-	delim, ok := token.(json.Delim)
-	if !ok {
-		return nil
-	}
-	switch delim {
-	case '{':
-		seen := map[string]bool{}
-		for d.More() {
-			token, err = d.Token()
-			if err != nil {
-				return err
-			}
-			key := token.(string)
-			if seen[key] {
-				return fmt.Errorf("duplicate")
-			}
-			seen[key] = true
-			child := key
-			if path != "" {
-				child = path + "." + key
-			}
-			if err = scanJSON(d, present, child); err != nil {
-				return err
-			}
-		}
-	case '[':
-		for d.More() {
-			if err = scanJSON(d, present, path); err != nil {
-				return err
-			}
-		}
-	default:
-		return fmt.Errorf("unexpected delimiter")
-	}
-	_, err = d.Token()
-	return err
-}
-
-func configField(value reflect.Value, indices []int) reflect.Value {
-	for _, i := range indices {
-		for value.Kind() == reflect.Pointer {
-			if value.IsNil() {
-				value.Set(reflect.New(value.Type().Elem()))
-			}
-			value = value.Elem()
-		}
-		value = value.Field(i)
-	}
-	return value
 }

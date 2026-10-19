@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"reflect"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -33,7 +32,6 @@ func environmentJSON(environment []string) ([]byte, error) {
 	}
 	var entries []entry
 	paths := map[string]bool{}
-	identifier := regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 	for _, text := range environment {
 		if !strings.HasPrefix(text, "KOALA_") {
 			continue
@@ -44,7 +42,7 @@ func environmentJSON(environment []string) ([]byte, error) {
 		}
 		path := strings.Split(strings.TrimPrefix(key, "KOALA_"), "__")
 		for i, part := range path {
-			if !identifier.MatchString(part) {
+			if !environmentKeyPattern.MatchString(part) {
 				return nil, fmt.Errorf("invalid environment path %s", key)
 			}
 			path[i] = strings.ToLower(part)

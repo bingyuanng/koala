@@ -17,8 +17,13 @@ import (
 	"github.com/bingyuanng/koala/internal/generate"
 )
 
+var (
+	environmentNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
+	environmentKeyPattern  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+)
+
 func configEnvCommand(args []string, out io.Writer) error {
-	if len(args) != 1 || !regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`).MatchString(args[0]) {
+	if len(args) != 1 || !environmentNamePattern.MatchString(args[0]) {
 		return errors.New("usage: koala config env <environment> (for example: koala config env prod)")
 	}
 	root, err := generate.Find(".")
@@ -121,7 +126,7 @@ func flattenConfigEnv(prefix string, values map[string]any, schema reflect.Type,
 	}
 	sort.Strings(keys)
 	for _, name := range keys {
-		if !regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`).MatchString(name) || strings.Contains(name, "__") {
+		if !environmentKeyPattern.MatchString(name) || strings.Contains(name, "__") {
 			return errors.New("configuration keys must form unambiguous shell environment names")
 		}
 		key := prefix + strings.ToUpper(name)

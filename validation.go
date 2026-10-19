@@ -3,6 +3,7 @@ package koala
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"buf.build/go/protovalidate"
 	"google.golang.org/protobuf/proto"
@@ -40,4 +41,31 @@ func ValidateConfig(server ServerConfig, requests RequestConfig, services ...pro
 		return errors.New("koala: invalid request validation rules")
 	}
 	return nil
+}
+
+func (a *App) prepareRequests() (protovalidate.Validator, error) {
+	budget, _ := time.ParseDuration(a.requests.DefaultTimeout)
+	var messages []proto.Message
+	for _, r := range a.registrations {
+		for i := 0; i < r.Descriptor.Methods().Len(); i++ {
+			m := r.Descriptor.Methods().Get(i)
+			key := string(r.Descriptor.FullName()) + "/" + string(m.Name())
+			methodBudget := budget
+			if v, ok := a.requests.MethodTimeouts[key]; ok {
+				methodBudget, _ = time.ParseDuration(v)
+			}
+			a.methods["/"+key] = methodBudget
+			messages = append(messages, dynamicpb.NewMessage(m.Input()))
+		}
+	}
+	for key := range a.requests.MethodTimeouts {
+		if _, ok := a.methods["/"+key]; !ok {
+			return nil, fmt.Errorf("koala: request timeout references unknown RPC %s", key)
+		}
+	}
+	validator, err := protovalidate.New(protovalidate.WithMessages(messages...))
+	if err != nil {
+		return nil, errors.New("koala: invalid request validation rules")
+	}
+	return validator, nil
 }

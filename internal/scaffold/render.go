@@ -6,7 +6,6 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
-	"github.com/bingyuanng/koala/config"
 	"go/format"
 	"io/fs"
 	"path"
@@ -14,6 +13,8 @@ import (
 	"sort"
 	"strings"
 	"text/template"
+
+	"github.com/bingyuanng/koala/config"
 )
 
 //go:embed all:templates
@@ -35,11 +36,17 @@ type File struct {
 	Ownership string `json:"ownership"`
 }
 
+var (
+	modulePathPattern     = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._/-]*$`)
+	serviceNamePattern    = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	releaseVersionPattern = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?$`)
+)
+
 func Render(kind string, data Data) ([]File, error) {
 	if kind != "project" && kind != "service" {
 		return nil, fmt.Errorf("unknown template set %q", kind)
 	}
-	if !regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._/-]*$`).MatchString(data.ModulePath) || strings.Contains(data.ModulePath, "..") {
+	if !modulePathPattern.MatchString(data.ModulePath) || strings.Contains(data.ModulePath, "..") {
 		return nil, fmt.Errorf("invalid ModulePath")
 	}
 	for _, segment := range strings.Split(data.ModulePath, "/") {
@@ -50,10 +57,10 @@ func Render(kind string, data Data) ([]File, error) {
 	if data.ProjectName == "" {
 		return nil, fmt.Errorf("ProjectName is required")
 	}
-	if !regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`).MatchString(data.ServiceName) {
+	if !serviceNamePattern.MatchString(data.ServiceName) {
 		return nil, fmt.Errorf("ServiceName must be a Go identifier")
 	}
-	if kind == "project" && !regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?$`).MatchString(data.FrameworkVersion) {
+	if kind == "project" && !releaseVersionPattern.MatchString(data.FrameworkVersion) {
 		return nil, fmt.Errorf("FrameworkVersion must be an explicit release version")
 	}
 	data.ServiceDirectory = strings.ToLower(strings.TrimSuffix(data.ServiceName, "Service"))

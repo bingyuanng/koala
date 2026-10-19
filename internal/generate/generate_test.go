@@ -29,6 +29,7 @@ func TestDescriptorScopeAndStreaming(t *testing.T) {
 		t.Fatal("streaming accepted")
 	}
 }
+
 func TestOwnershipAndSymlinks(t *testing.T) {
 	root := t.TempDir()
 	p := "gen/go/hand.go"
@@ -48,6 +49,7 @@ func TestOwnershipAndSymlinks(t *testing.T) {
 		t.Fatal("symlink accepted")
 	}
 }
+
 func TestRegistryIsDeterministic(t *testing.T) {
 	c := Config{DependencyType: "example.com/app/internal/deps.Dependencies"}
 	c.Registry.Package = "bootstrap"
