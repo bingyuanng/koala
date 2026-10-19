@@ -16,7 +16,7 @@ func TestMissingMiseRejectsOperationsBeforeWriting(t *testing.T) {
 	t.Setenv("PATH", dir)
 	for _, args := range [][]string{
 		{"new", "my-api"}, {"new", "service", "user"},
-		{"gen"}, {"generate"}, {"config", "json", "--output", "config.json"}, {"start"},
+		{"gen"}, {"generate"}, {"config", "prd", "env"}, {"start"},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := Run(args, &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), "mise is required on PATH") {

@@ -28,6 +28,18 @@ It selects the configuration sources:
 Names are case-sensitive. Only the exact value `dev` reads a file. Other values,
 including `staging`, `production`, and `test`, skip all JSON configuration files.
 Files such as `config.stg.json` and `config.prd.json` are not loaded automatically.
+Use those files to prepare deployment variables:
+
+```sh
+koala config prd       # Print config.prd.json as JSON
+koala config prd env   # Print its KOALA_ environment assignments
+```
+
+The same commands accept `stg` and `dev`. They read only the selected file,
+without merging defaults or current environment variables. Inject the exported
+variables into the deployment; the application does not read the staging or
+production JSON file.
+
 
 `KOALA_ENV` is read before selecting a file, so it belongs in the process
 environment. A top-level `env` key in JSON is not supported.

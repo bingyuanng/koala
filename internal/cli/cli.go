@@ -21,9 +21,8 @@ Usage:
   koala new <project> [--module path] [--framework-version version]
   koala new service <name>
   koala gen [--buf path] [--strict] [--local-plugins directory]
-  koala config json [--output path] [--force]
-  koala config env <environment>
-  koala config env json
+  koala config <dev|stg|prd>
+  koala config <dev|stg|prd> env
   koala start [--gen]
 
 Requires mise on PATH: https://mise.jdx.dev/getting-started.html
@@ -68,7 +67,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		case "new":
 			err = newCommand(args[1:], stdout, stderr)
 		case "config":
-			err = configCommand(args[1:], stdout, stderr)
+			err = configCommand(args[1:], stdout)
 		default:
 			err = generateCommand(args[0], args[1:], stdout, stderr)
 		}
