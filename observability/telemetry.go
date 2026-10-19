@@ -108,10 +108,12 @@ func (h Handler) WithGroup(g string) slog.Handler      { return Handler{h.Handle
 func (p *Providers) ClientOptions() []grpc.DialOption {
 	return []grpc.DialOption{grpc.WithStatsHandler(otelgrpc.NewClientHandler(otelgrpc.WithTracerProvider(p.Traces), otelgrpc.WithMeterProvider(p.Metrics), otelgrpc.WithPropagators(Propagator)))}
 }
-func (p *Providers) ServerOption(allow ...func(string) bool) grpc.ServerOption {
+
+// ServerOption instruments RPCs accepted by allow. A nil filter instruments all RPCs.
+func (p *Providers) ServerOption(allow func(string) bool) grpc.ServerOption {
 	options := []otelgrpc.Option{otelgrpc.WithTracerProvider(p.Traces), otelgrpc.WithMeterProvider(p.Metrics), otelgrpc.WithPropagators(Propagator)}
-	if len(allow) > 0 {
-		options = append(options, otelgrpc.WithFilter(func(info *stats.RPCTagInfo) bool { return allow[0](info.FullMethodName) }))
+	if allow != nil {
+		options = append(options, otelgrpc.WithFilter(func(info *stats.RPCTagInfo) bool { return allow(info.FullMethodName) }))
 	}
 	return grpc.StatsHandler(otelgrpc.NewServerHandler(options...))
 }

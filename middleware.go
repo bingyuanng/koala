@@ -3,8 +3,10 @@ package koala
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -17,9 +19,14 @@ import (
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 )
+
+// Only this app's gateway can suppress the duplicate RPC completion record.
+// A client-supplied flag must not disable direct gRPC completion logging.
+const gatewayCompletionKey = "koala-gateway-completion"
 
 func (a *App) deadline(ctx context.Context, method string) (context.Context, context.CancelFunc) {
 	budget, ok := a.methods[method]
@@ -28,10 +35,14 @@ func (a *App) deadline(ctx context.Context, method string) (context.Context, con
 	}
 	return context.WithTimeout(ctx, budget)
 }
-func (a *App) clientDeadline() grpc.UnaryClientInterceptor {
+func (a *App) gatewayInterceptor() grpc.UnaryClientInterceptor {
 	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 		ctx, cancel := a.deadline(ctx, method)
 		defer cancel()
+		md, _ := metadata.FromOutgoingContext(ctx)
+		md = md.Copy()
+		md.Set(gatewayCompletionKey, a.gatewayToken)
+		ctx = metadata.NewOutgoingContext(ctx, md)
 		return invoke(ctx, method, req, reply, cc, opts...)
 	}
 }
@@ -41,11 +52,20 @@ func (a *App) interceptor(v protovalidate.Validator, p *observability.Providers)
 	panics, _ := meter.Int64Counter("koala.rpc.panics", metric.WithUnit("{panic}"))
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, next grpc.UnaryHandler) (resp any, err error) {
 		start := time.Now()
+		md, _ := metadata.FromIncomingContext(ctx)
+		values := md.Get(gatewayCompletionKey)
+		gatewayRequest := len(values) == 1 && values[0] == a.gatewayToken
+		if len(values) > 0 {
+			md = md.Copy()
+			md.Delete(gatewayCompletionKey)
+			ctx = metadata.NewIncomingContext(ctx, md)
+		}
 		ctx, cancel := a.deadline(ctx, info.FullMethod)
 		requestContext := ctx
 		defer cancel()
 		defer func() {
-			if recover() != nil {
+			if recovered := recover(); recovered != nil {
+				a.logPanic(ctx, "grpc", info.FullMethod, recovered)
 				panics.Add(ctx, 1, metric.WithAttributes(attribute.String("rpc.method", info.FullMethod)))
 				err = status.Error(codes.Internal, "internal server error")
 			}
@@ -56,11 +76,13 @@ func (a *App) interceptor(v protovalidate.Validator, p *observability.Providers)
 				if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 					err = status.FromContextError(err).Err()
 				} else if _, ok := status.FromError(err); !ok {
-					a.logger.ErrorContext(ctx, "application request failed", "method", info.FullMethod)
+					a.logger.ErrorContext(ctx, "application request failed", "method", info.FullMethod, "error", err)
 					err = status.Error(codes.Internal, "internal server error")
 				}
 			}
-			a.logger.InfoContext(ctx, "RPC completed", "transport", "grpc", "method", info.FullMethod, "status", status.Code(err).String(), "duration_ms", float64(time.Since(start).Microseconds())/1000)
+			if !gatewayRequest {
+				a.logger.InfoContext(ctx, "RPC completed", "transport", "grpc", "method", info.FullMethod, "status", status.Code(err).String(), "duration_ms", float64(time.Since(start).Microseconds())/1000)
+			}
 		}()
 		for _, hook := range []Hook{a.options.Authenticate, a.options.Authorize} {
 			if hook != nil {
@@ -149,7 +171,8 @@ func (a *App) httpCompletion(pattern string, next http.Handler) http.Handler {
 			w.Header().Set("X-Trace-Id", sc.TraceID().String())
 		}
 		defer func() {
-			if recover() != nil {
+			if recovered := recover(); recovered != nil {
+				a.logPanic(r.Context(), "http", pattern, recovered)
 				http.Error(rec, "internal server error", 500)
 			}
 			code := rec.status
@@ -164,7 +187,8 @@ func (a *App) httpCompletion(pattern string, next http.Handler) http.Handler {
 func (a *App) corsAndRecovery(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
-			if recover() != nil {
+			if recovered := recover(); recovered != nil {
+				a.logPanic(r.Context(), "http", r.Pattern, recovered)
 				http.Error(w, "internal server error", 500)
 			}
 		}()
@@ -208,3 +232,10 @@ func (a *App) corsAndRecovery(next http.Handler) http.Handler {
 }
 
 var requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
+
+func (a *App) logPanic(ctx context.Context, transport, operation string, recovered any) {
+	// Panic values can contain request data. The type and stack locate the failure
+	// without copying that data into logs or client responses.
+	a.logger.ErrorContext(ctx, "request panicked", "transport", transport, "operation", operation,
+		"panic_type", fmt.Sprintf("%T", recovered), "stack", string(debug.Stack()))
+}

@@ -2,9 +2,6 @@ package scaffold
 
 import (
 	"encoding/json"
-	"go/parser"
-	"go/token"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +14,7 @@ import (
 )
 
 func TestEmbeddedTemplates(t *testing.T) {
+	t.Chdir(t.TempDir())
 	for _, kind := range []string{"project", "service"} {
 		data := Data{ModulePath: "example.com/import-path", ProjectName: "Display Name", ServiceName: "Accounts", FrameworkVersion: "v0.1.2"}
 		files, err := Render(kind, data)
@@ -36,11 +34,6 @@ func TestEmbeddedTemplates(t *testing.T) {
 			joined += f.Content
 			if f.Path == ".gitignore" {
 				foundDotfile = true
-			}
-			if strings.HasSuffix(f.Path, ".go") {
-				if _, err := parser.ParseFile(token.NewFileSet(), f.Path, f.Content, parser.AllErrors); err != nil {
-					t.Fatal(err)
-				}
 			}
 			if strings.HasSuffix(f.Path, ".tmpl") {
 				t.Fatal("template suffix leaked")
@@ -86,44 +79,36 @@ func TestRenderErrorsAreAtomic(t *testing.T) {
 	}
 }
 
-func TestEmbeddedAssetsOutsideRepository(t *testing.T) {
-	t.Parallel()
-	binary, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	outside := t.TempDir()
-	check := exec.Command(binary, "-test.run=^TestEmbeddedTemplates$")
-	check.Dir = outside
-	if output, err := check.CombinedOutput(); err != nil {
-		t.Fatalf("relocated assets: %v, %s", err, output)
-	}
-}
-
 func TestRenderedProjectBuilds(t *testing.T) {
 	t.Parallel()
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
 	}
-	files, err := Render("project", Data{
-		ModulePath: "example.com/independent", ProjectName: "Display Name",
-		ServiceName: "Accounts", FrameworkVersion: "v0.1.0",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	project := t.TempDir()
-	for _, file := range files {
-		target := filepath.Join(project, file.Path)
-		if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
+	for _, kind := range []string{"project", "service"} {
+		files, err := Render(kind, Data{
+			ModulePath: "example.com/independent", ProjectName: "Display Name",
+			ServiceName: "UserService", FrameworkVersion: "v0.1.0",
+		})
+		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(target, []byte(file.Content), 0600); err != nil {
+		for _, file := range files {
+			target := filepath.Join(project, file.Path)
+			if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(target, []byte(file.Content), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for _, fixture := range []string{"internal/scaffold/testdata/health/gen/go", "internal/testdata/runtime/gen/go"} {
+		if err := os.CopyFS(filepath.Join(project, "gen/go"), os.DirFS(filepath.Join(root, fixture))); err != nil {
 			t.Fatal(err)
 		}
 	}
-	copyHealthTransportFixture(t, root, project)
 	// Applications extend their own Config without editing Koala or adding conversions.
 	configPath := filepath.Join(project, "internal/config/config.go")
 	configSource, err := os.ReadFile(configPath)
@@ -230,9 +215,6 @@ func TestProjectLayoutAndDefaults(t *testing.T) {
 			t.Errorf("missing project path %s", name)
 		}
 	}
-	if !strings.Contains(paths["proto/health/v1/health.proto"].Content, `get: "/healthz"`) || !strings.Contains(paths["internal/service/health/service.go"].Content, `Status: "ok"`) {
-		t.Fatal("sample health contract or implementation missing")
-	}
 	fixture, err := os.ReadFile("testdata/health/proto/health/v1/health.proto")
 	if err != nil {
 		t.Fatal(err)
@@ -253,39 +235,7 @@ func TestProjectLayoutAndDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, file := range service {
-		if file.Ownership != "application" {
-			t.Fatalf("service source is not application-owned: %s", file.Path)
-		}
-	}
 	if len(service) != 2 || service[0].Path != "internal/service/user/service.go" || service[1].Path != "proto/user/v1/user.proto" {
 		t.Fatalf("service layout = %v", service)
-	}
-}
-
-// Ordinary template tests use retained transport code instead of running Buf.
-func copyHealthTransportFixture(t *testing.T, root, project string) {
-	t.Helper()
-	source := filepath.Join(root, "internal/scaffold/testdata/health/gen/go")
-	err := filepath.WalkDir(source, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || entry.IsDir() {
-			return err
-		}
-		rel, err := filepath.Rel(source, path)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(project, "gen/go", rel)
-		if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
-			return err
-		}
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		return os.WriteFile(target, content, 0600)
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 }

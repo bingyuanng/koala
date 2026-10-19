@@ -14,25 +14,19 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bingyuanng/koala/tools"
 	"go.yaml.in/yaml/v3"
 	"golang.org/x/mod/modfile"
 )
 
-type versionContract struct {
-	Go      string            `json:"go"`
-	Buf     string            `json:"buf"`
-	Plugins map[string]string `json:"plugins"`
-	Modules map[string]string `json:"modules"`
-}
-
-func readVersionContract(t *testing.T) (string, versionContract) {
+func readVersionContract(t *testing.T) (string, tools.Versions) {
 	t.Helper()
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var contract versionContract
-	if err := json.Unmarshal(readVersionFile(t, root, "tools/versions.json"), &contract); err != nil {
+	contract, err := tools.ReadVersions()
+	if err != nil {
 		t.Fatal(err)
 	}
 	return root, contract

@@ -11,7 +11,6 @@ import (
 )
 
 func TestCloseReversesResourcesAndPreservesErrors(t *testing.T) {
-	cfg := testConfig()
 	failure := errors.New("resource failed")
 	var order []int
 	var deadline time.Time
@@ -31,7 +30,7 @@ func TestCloseReversesResourcesAndPreservesErrors(t *testing.T) {
 		}
 		order = append(order, value)
 	}
-	err := koala.Close(cfg.Server.ShutdownTimeout,
+	err := koala.Close("1s",
 		func(ctx context.Context) error { record(ctx, 1); return nil },
 		func(ctx context.Context) error { record(ctx, 2); return failure },
 		func(ctx context.Context) error { record(ctx, 3); panic("private") },
@@ -48,10 +47,8 @@ func TestCloseReversesResourcesAndPreservesErrors(t *testing.T) {
 }
 
 func TestCloseContinuesAfterTimeout(t *testing.T) {
-	cfg := testConfig()
-	cfg.Server.ShutdownTimeout = "10ms"
 	called := false
-	err := koala.Close(cfg.Server.ShutdownTimeout,
+	err := koala.Close("10ms",
 		func(ctx context.Context) error {
 			called = true
 			if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
@@ -68,9 +65,7 @@ func TestCloseContinuesAfterTimeout(t *testing.T) {
 
 func TestCloseRejectsInvalidBudget(t *testing.T) {
 	for _, value := range []string{"invalid", "0s", "-1s"} {
-		cfg := testConfig()
-		cfg.Server.ShutdownTimeout = value
-		if err := koala.Close(cfg.Server.ShutdownTimeout); err == nil {
+		if err := koala.Close(value); err == nil {
 			t.Fatal("invalid budget accepted", value)
 		}
 	}
