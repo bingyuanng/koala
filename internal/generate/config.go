@@ -10,16 +10,18 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
+// Version 1 uses one project layout. These are conventions, not user settings.
+const (
+	protoDirectory  = "proto"
+	servicePackages = "./internal/service/..."
+	registryPackage = "bootstrap"
+	registryOutput  = "internal/bootstrap/services_gen.go"
+)
+
 type Config struct {
-	Version         string   `yaml:"version"`
-	ProtoRoot       string   `yaml:"proto_root"`
-	ServicePackages string   `yaml:"service_packages"`
-	DependencyType  string   `yaml:"dependency_type"`
-	Exclude         []string `yaml:"exclude"`
-	Registry        struct {
-		Package string `yaml:"package"`
-		Output  string `yaml:"output"`
-	} `yaml:"registry"`
+	Version        string   `yaml:"version"`
+	DependencyType string   `yaml:"dependency_type"`
+	Exclude        []string `yaml:"exclude"`
 }
 
 func Find(start string) (string, error) {
@@ -51,8 +53,8 @@ func readConfig(root string) (Config, error) {
 	if e = decoder.Decode(&c); e != nil {
 		return c, fmt.Errorf("invalid koala.yaml: %w", e)
 	}
-	if c.Version != "v1" || c.ProtoRoot != "proto" || c.ServicePackages != "./internal/service/..." || c.Registry.Package != "bootstrap" || c.Registry.Output != "internal/bootstrap/services_gen.go" {
-		return c, fmt.Errorf("koala.yaml v1 requires proto/, ./internal/service/..., and internal/bootstrap/services_gen.go in package bootstrap")
+	if c.Version != "v1" {
+		return c, fmt.Errorf("koala.yaml version must be v1")
 	}
 	if _, _, e = splitType(c.DependencyType); e != nil {
 		return c, e

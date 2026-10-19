@@ -28,7 +28,7 @@ func TestEmbeddedTemplates(t *testing.T) {
 		joined := ""
 		foundDotfile := false
 		for _, f := range files {
-			if f.Ownership != "application" && !(strings.HasPrefix(f.Path, "gen/") && f.Ownership == "generated") {
+			if f.Ownership != "application" && !((strings.HasPrefix(f.Path, "gen/") || strings.HasPrefix(f.Path, ".koala/") || f.Path == "internal/bootstrap/services_gen.go") && f.Ownership == "generated") {
 				t.Fatalf("incorrect ownership for %s: %s", f.Path, f.Ownership)
 			}
 			joined += f.Content

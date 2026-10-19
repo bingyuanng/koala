@@ -25,9 +25,9 @@ type manifest struct {
 
 func hash(b []byte) string { s := sha256.Sum256(b); return hex.EncodeToString(s[:]) }
 
-func protoSources(root string, c Config) ([]string, error) {
+func protoSources(root string) ([]string, error) {
 	var files []string
-	protoRoot := filepath.Join(root, c.ProtoRoot)
+	protoRoot := filepath.Join(root, protoDirectory)
 	err := filepath.WalkDir(protoRoot, func(p string, d os.DirEntry, err error) error {
 		if p == protoRoot && os.IsNotExist(err) {
 			return nil
@@ -47,12 +47,12 @@ func protoSources(root string, c Config) ([]string, error) {
 	return files, err
 }
 
-func contractHash(root string, c Config) (string, error) {
+func contractHash(root string) (string, error) {
 	module, e := ApplicationImportPath(root)
 	if e != nil {
 		return "", e
 	}
-	sources, e := protoSources(root, c)
+	sources, e := protoSources(root)
 	if e != nil {
 		return "", e
 	}
@@ -80,7 +80,7 @@ func contractHash(root string, c Config) (string, error) {
 }
 
 func inputHash(ctx context.Context, root string, c Config, services []service) (string, error) {
-	contracts, e := contractHash(root, c)
+	contracts, e := contractHash(root)
 	if e != nil {
 		return "", e
 	}
@@ -152,7 +152,7 @@ func readManifest(root string) (manifest, error) {
 	if e != nil {
 		return m, e
 	}
-	if m.Outputs["internal/bootstrap/services_gen.go"] == "" || m.Outputs[".koala/descriptors.bin"] == "" {
+	if m.Outputs[registryOutput] == "" || m.Outputs[".koala/descriptors.bin"] == "" {
 		return manifest{}, fmt.Errorf("incomplete generation ownership manifest")
 	}
 	for p, want := range m.Outputs {
@@ -164,7 +164,7 @@ func readManifest(root string) (manifest, error) {
 }
 
 // Read and verify each reusable artifact once. A cache miss follows the normal
-// generation path, whose ownership checks still reject modified outputs.
+// generation path, which replaces modified owned outputs.
 func cachedTransports(root string, previous manifest, contracts string) ([]byte, map[string][]byte, bool) {
 	if previous.Contracts != contracts || previous.Version != 1 {
 		return nil, nil, false

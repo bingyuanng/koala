@@ -2,6 +2,7 @@ package generate
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -19,6 +20,7 @@ type outputState struct {
 // Generated transports must be available to Go's type checker before registry
 // validation. Keep their original bytes until every generation stage succeeds.
 type outputTransaction struct {
+	committed bool
 	root      string
 	originals map[string]outputState
 	expected  map[string]outputState
@@ -73,35 +75,67 @@ func checkOwned(root, path string, data []byte, previous manifest) error {
 	if err != nil || !old.exists {
 		return err
 	}
-	if oldHash, owned := previous.Outputs[path]; owned {
-		if hash(old.data) != oldHash {
-			return fmt.Errorf("refusing to overwrite modified generated output %s", path)
-		}
-	} else if strings.HasSuffix(path, ".go") && !bytes.HasPrefix(old.data, []byte("// Code generated")) {
-		return fmt.Errorf("refusing to overwrite application source %s", path)
-	} else if strings.HasSuffix(path, ".json") && !bytes.Equal(old.data, data) {
-		return fmt.Errorf("unowned output %s", path)
+	// The manifest establishes ownership. Hashes detect stale outputs for start
+	// and cache reuse; regeneration intentionally replaces edits to owned files.
+	if _, owned := previous.Outputs[path]; !owned && !bytes.Equal(old.data, data) {
+		return fmt.Errorf("refusing to overwrite unowned output %s", path)
 	}
 	return nil
 }
 
-func (t *outputTransaction) writeOwned(path string, data []byte, previous manifest) error {
-	if err := checkOwned(t.root, path, data, previous); err != nil {
+// checkWrites preflights the complete batch before any file is installed.
+func (t *outputTransaction) checkWrites(outputs map[string][]byte, previous manifest) ([]string, error) {
+	paths := make([]string, 0, len(outputs))
+	for path := range outputs {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		if err := checkOwned(t.root, path, outputs[path], previous); err != nil {
+			return nil, err
+		}
+	}
+	return paths, nil
+}
+
+// writeOutputs installs registration files without removing transport outputs.
+func (t *outputTransaction) writeOutputs(outputs map[string][]byte, previous manifest) error {
+	paths, err := t.checkWrites(outputs, previous)
+	if err != nil {
 		return err
 	}
-	return t.write(path, data)
+	for _, path := range paths {
+		if err := t.write(path, outputs[path]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// commit publishes ownership/freshness only after consumer validation succeeds.
+func (t *outputTransaction) commit(contracts, input string, outputs map[string][]byte) error {
+	m := manifest{Version: 1, Contracts: contracts, Input: input, Outputs: map[string]string{}}
+	for path, data := range outputs {
+		m.Outputs[path] = hash(data)
+	}
+	data, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := t.write(manifestPath, append(data, '\n')); err != nil {
+		return err
+	}
+	t.committed = true
+	return nil
 }
 
 func (t *outputTransaction) install(outputs map[string][]byte, previous manifest) error {
-	var writes, removals []string
-	// Check every ownership conflict before changing any transport file.
-	for path, data := range outputs {
-		if err := checkOwned(t.root, path, data, previous); err != nil {
-			return err
-		}
-		writes = append(writes, path)
+	writes, err := t.checkWrites(outputs, previous)
+	if err != nil {
+		return err
 	}
-	for path, want := range previous.Outputs {
+	var removals []string
+	for path := range previous.Outputs {
 		if _, retained := outputs[path]; retained || !strings.HasPrefix(path, "gen/") {
 			continue
 		}
@@ -112,12 +146,8 @@ func (t *outputTransaction) install(outputs map[string][]byte, previous manifest
 		if !old.exists {
 			continue
 		}
-		if hash(old.data) != want {
-			return fmt.Errorf("refusing to remove modified generated output %s", path)
-		}
 		removals = append(removals, path)
 	}
-	sort.Strings(writes)
 	sort.Strings(removals)
 	for _, path := range writes {
 		if err := t.write(path, outputs[path]); err != nil {
@@ -137,6 +167,9 @@ func (t *outputTransaction) install(outputs map[string][]byte, previous manifest
 }
 
 func (t *outputTransaction) rollback() error {
+	if t.committed {
+		return nil
+	}
 	var result error
 	for i := len(t.paths) - 1; i >= 0; i-- {
 		path := t.paths[i]
@@ -246,7 +279,7 @@ func safeOutput(p string) bool {
 	if filepath.ToSlash(filepath.Clean(p)) != p || strings.Contains(p, "\\") || filepath.IsAbs(p) {
 		return false
 	}
-	if p == "internal/bootstrap/services_gen.go" || p == ".koala/descriptors.bin" || p == "gen/openapi/api.swagger.json" || p == "gen/openapi/openapi_gen.go" {
+	if p == registryOutput || p == ".koala/descriptors.bin" || p == "gen/openapi/api.swagger.json" || p == "gen/openapi/openapi_gen.go" {
 		return true
 	}
 	return strings.HasPrefix(p, "gen/go/") && (strings.HasSuffix(p, ".pb.go") || strings.HasSuffix(p, ".pb.gw.go")) && !strings.Contains(p, "../")

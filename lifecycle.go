@@ -16,6 +16,17 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
+// runningTransports records resources as startup acquires them, including partial
+// startup. Run owns one cleanup path for all of these resources.
+type runningTransports struct {
+	grpc         *grpc.Server
+	http         *http.Server
+	gateway      *grpc.ClientConn
+	grpcListener net.Listener
+	httpListener net.Listener
+	failed       chan error
+}
+
 func (a *App) Run(ctx context.Context) (result error) {
 	a.mu.Lock()
 	if a.started {
@@ -24,31 +35,35 @@ func (a *App) Run(ctx context.Context) (result error) {
 	}
 	a.started = true
 	a.mu.Unlock()
+
+	transports := &runningTransports{failed: make(chan error, 2)}
+	ready := false
+	defer func() { result = errors.Join(result, a.shutdownTransports(transports, ready)) }()
+	if err := a.startTransports(ctx, transports); err != nil {
+		return err
+	}
+	if err := invokeLifecycleHook("ready", ctx, a.options.OnReady); err != nil {
+		return err
+	}
+	ready = true
+	a.healthy.Store(true)
+	close(a.ready)
+	a.announceReady()
+	select {
+	case <-ctx.Done():
+		return nil
+	case err := <-transports.failed:
+		if err == nil {
+			err = errors.New("listener stopped unexpectedly")
+		}
+		return fmt.Errorf("koala: serving failed: %w", err)
+	}
+}
+
+// gRPC must serve during startup for the gateway connectivity/TLS preflight.
+// Readiness is announced by Run only after both transports and OnReady succeed.
+func (a *App) startTransports(ctx context.Context, transports *runningTransports) error {
 	telemetry := a.options.Telemetry
-	shutdownBudget, _ := time.ParseDuration(a.server.ShutdownTimeout)
-	var shutdownContext context.Context
-	var shutdownCancel context.CancelFunc
-	startShutdown := func() context.Context {
-		if shutdownContext == nil {
-			shutdownContext, shutdownCancel = context.WithTimeout(context.Background(), shutdownBudget)
-		}
-		return shutdownContext
-	}
-	stopped := false
-	stop := func() {
-		if stopped {
-			return
-		}
-		stopped = true
-		a.healthy.Store(false)
-		result = errors.Join(result, invokeLifecycleHook("shutdown", startShutdown(), a.options.OnShutdown))
-	}
-	defer func() {
-		stop()
-		if shutdownCancel != nil {
-			shutdownCancel()
-		}
-	}()
 	services := make([]protoreflect.ServiceDescriptor, len(a.registrations))
 	for i, r := range a.registrations {
 		services[i] = r.Descriptor
@@ -62,15 +77,15 @@ func (a *App) Run(ctx context.Context) (result error) {
 		_, known := a.methods[method]
 		return known
 	}), grpc.ChainUnaryInterceptor(a.interceptor(validator, telemetry))}
-	tlsOption, dialCredentials, err := a.transportCredentials()
+	serverCredentials, dialCredentials, err := a.transportCredentials()
 	if err != nil {
 		return err
 	}
-	if tlsOption != nil {
-		serverOptions = append(serverOptions, tlsOption)
+	if serverCredentials != nil {
+		serverOptions = append(serverOptions, serverCredentials)
 	}
 	server := grpc.NewServer(serverOptions...)
-	defer server.Stop()
+	transports.grpc = server
 	// Protect public registration callbacks from turning a setup error into a process panic.
 	if err := registerServices(server, a.registrations, a.options.RegisterGRPC); err != nil {
 		return err
@@ -88,53 +103,50 @@ func (a *App) Run(ctx context.Context) (result error) {
 	if listen == nil {
 		listen = net.Listen
 	}
-	gl, err := listen("tcp", net.JoinHostPort(a.server.GRPC.Host, strconv.Itoa(a.server.GRPC.Port)))
+	grpcListener, err := listen("tcp", net.JoinHostPort(a.server.GRPC.Host, strconv.Itoa(a.server.GRPC.Port)))
 	if err != nil {
 		return fmt.Errorf("koala: bind gRPC: %w", err)
 	}
-	defer gl.Close()
-	var hl net.Listener
+	transports.grpcListener = grpcListener
+	var httpListener net.Listener
 	if a.server.HTTP.Enabled {
-		hl, err = listen("tcp", net.JoinHostPort(a.server.HTTP.Host, strconv.Itoa(a.server.HTTP.Port)))
+		httpListener, err = listen("tcp", net.JoinHostPort(a.server.HTTP.Host, strconv.Itoa(a.server.HTTP.Port)))
 		if err != nil {
 			return fmt.Errorf("koala: bind HTTP: %w", err)
 		}
-		defer hl.Close()
+		transports.httpListener = httpListener
 	}
 	a.mu.Lock()
-	a.grpcAddress = gl.Addr().String()
-	if hl != nil {
-		a.httpAddress = hl.Addr().String()
+	a.grpcAddress = grpcListener.Addr().String()
+	if httpListener != nil {
+		a.httpAddress = httpListener.Addr().String()
 	}
 	a.mu.Unlock()
-	failed := make(chan error, 2)
-	go func() { failed <- server.Serve(gl) }()
-	var httpServer *http.Server
-	var conn *grpc.ClientConn
-	if hl != nil {
-		target := gl.Addr().String()
+	go func() { transports.failed <- server.Serve(grpcListener) }()
+	if httpListener != nil {
+		target := grpcListener.Addr().String()
 		host, port, _ := net.SplitHostPort(target)
 		if ip := net.ParseIP(host); ip != nil && ip.IsUnspecified() {
 			host = "127.0.0.1"
 		}
 		target = net.JoinHostPort(host, port)
-		opts := append(telemetry.ClientOptions(), grpc.WithTransportCredentials(dialCredentials), grpc.WithChainUnaryInterceptor(a.gatewayInterceptor()))
-		conn, err = grpc.NewClient(target, opts...)
+		clientOptions := append(telemetry.ClientOptions(), grpc.WithTransportCredentials(dialCredentials), grpc.WithChainUnaryInterceptor(a.gatewayInterceptor()))
+		gatewayConnection, err := grpc.NewClient(target, clientOptions...)
 		if err != nil {
 			return fmt.Errorf("koala: gateway client: %w", err)
 		}
-		defer conn.Close()
-		httpServer, err = a.gatewayServer(ctx, conn)
+		transports.gateway = gatewayConnection
+		httpServer, err := a.gatewayServer(ctx, gatewayConnection)
 		if err != nil {
 			return err
 		}
-		go func() { failed <- httpServer.Serve(hl) }()
+		transports.http = httpServer
+		go func() { transports.failed <- httpServer.Serve(httpListener) }()
 	}
-	if err := invokeLifecycleHook("ready", ctx, a.options.OnReady); err != nil {
-		return err
-	}
-	a.healthy.Store(true)
-	close(a.ready)
+	return nil
+}
+
+func (a *App) announceReady() {
 	healthPath := ""
 	if a.hasHTTPRoute("GET", "/healthz") {
 		healthPath = "/healthz"
@@ -145,34 +157,52 @@ func (a *App) Run(ctx context.Context) (result error) {
 		a.logger.Warn("startup notification failed", "error", err)
 	}
 	a.logger.Info("application ready", "grpc", a.grpcAddress, "http", a.httpAddress)
-	select {
-	case <-ctx.Done():
-	case err = <-failed:
-		if err == nil {
-			err = errors.New("listener stopped unexpectedly")
+}
+
+// All exits use the same order: withdraw readiness and notify the application,
+// finish HTTP, close its gateway connection, finish gRPC, release listeners.
+// Failed startup closes immediately; a ready application drains within one budget.
+func (a *App) shutdownTransports(t *runningTransports, graceful bool) error {
+	a.healthy.Store(false)
+	budget, _ := time.ParseDuration(a.server.ShutdownTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
+	defer cancel()
+	result := invokeLifecycleHook("shutdown", ctx, a.options.OnShutdown)
+	if t.http != nil {
+		if graceful {
+			result = errors.Join(result, t.http.Shutdown(ctx))
 		}
-		result = fmt.Errorf("koala: serving failed: %w", err)
+		result = errors.Join(result, t.http.Close())
 	}
-	stop()
-	shutdown := startShutdown()
-	if httpServer != nil {
-		if e := httpServer.Shutdown(shutdown); e != nil {
-			_ = httpServer.Close()
-			result = errors.Join(result, e)
+	if t.gateway != nil {
+		result = errors.Join(result, t.gateway.Close())
+	}
+	if t.grpc != nil {
+		if graceful {
+			drained := make(chan struct{})
+			go func() { t.grpc.GracefulStop(); close(drained) }()
+			select {
+			case <-drained:
+			case <-ctx.Done():
+				t.grpc.Stop()
+				result = errors.Join(result, ctx.Err())
+			}
+		} else {
+			t.grpc.Stop()
 		}
 	}
-	if conn != nil {
-		_ = conn.Close()
+	// A listener may have been bound before its server could start. Servers
+	// close their own listeners too, so an already-closed listener is expected.
+	for _, listener := range []net.Listener{t.httpListener, t.grpcListener} {
+		if listener != nil {
+			if err := listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+				result = errors.Join(result, err)
+			}
+		}
 	}
-	drained := make(chan struct{})
-	go func() { server.GracefulStop(); close(drained) }()
-	select {
-	case <-drained:
-	case <-shutdown.Done():
-		server.Stop()
-		result = errors.Join(result, shutdown.Err())
+	if graceful {
+		a.logger.Info("application stopped")
 	}
-	a.logger.Info("application stopped")
 	return result
 }
 

@@ -9,9 +9,14 @@ import (
 	"strings"
 	"testing"
 
+	userv1 "github.com/bingyuanng/koala/internal/testdata/runtime/gen/go/user/v1"
 	"github.com/bingyuanng/koala/observability"
 	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	tracenoop "go.opentelemetry.io/otel/trace/noop"
+	"google.golang.org/genproto/googleapis/api/annotations"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protodesc"
+	"google.golang.org/protobuf/reflect/protoregistry"
 )
 
 func probeTestApp(t *testing.T) *App {
@@ -23,41 +28,19 @@ func probeTestApp(t *testing.T) *App {
 	return app
 }
 
-func TestApplicationHTTPRoutes(t *testing.T) {
-	app := probeTestApp(t)
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusAccepted) })
-	if err := app.HandleHTTP("GET /readyz", handler); err != nil {
-		t.Fatal(err)
-	}
-	mux, err := app.httpHandler(nil, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	response := httptest.NewRecorder()
-	mux.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/readyz", nil))
-	if response.Code != http.StatusAccepted {
-		t.Fatal(response.Code)
-	}
-	if err := app.HandleHTTP("GET /readyz", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})); err == nil {
-		t.Fatal("duplicate accepted")
-	}
-	if err := app.HandleHTTP("GET /nil", nil); err == nil {
-		t.Fatal("nil accepted")
-	}
-	if err := app.HandleHTTP("GET /{", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})); err == nil {
-		t.Fatal("invalid pattern accepted")
-	}
-}
-
-func TestApplicationRouteConflictsWithDocs(t *testing.T) {
+func TestProtobufRouteConflictsWithDocs(t *testing.T) {
 	for _, path := range []string{"/docs", "/openapi.json"} {
 		t.Run(path, func(t *testing.T) {
 			app := probeTestApp(t)
 			app.options.OpenAPI = []byte(`{"swagger":"2.0"}`)
-			if err := app.HandleHTTP("GET "+path, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})); err != nil {
+			file := protodesc.ToFileDescriptorProto(userv1.File_user_v1_user_proto)
+			proto.SetExtension(file.Service[0].Method[1].Options, annotations.E_Http, &annotations.HttpRule{Pattern: &annotations.HttpRule_Get{Get: path}})
+			descriptor, err := protodesc.NewFile(file, protoregistry.GlobalFiles)
+			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := app.httpHandler(nil, nil); err == nil {
+			app.registrations = []Registration{{Descriptor: descriptor.Services().Get(0)}}
+			if _, err := app.httpHandler(http.NotFoundHandler(), app.options.Telemetry); err == nil {
 				t.Fatal("conflicting documentation route accepted")
 			}
 		})
@@ -66,7 +49,7 @@ func TestApplicationRouteConflictsWithDocs(t *testing.T) {
 
 func TestHTTPPanicDiagnostics(t *testing.T) {
 	for _, completion := range []bool{false, true} {
-		name := "application route"
+		name := "outer recovery"
 		if completion {
 			name = "completion wrapper"
 		}
@@ -78,14 +61,7 @@ func TestHTTPPanicDiagnostics(t *testing.T) {
 			if completion {
 				handler = app.httpCompletion("GET /panic", handler)
 			} else {
-				if err := app.HandleHTTP("GET /panic", handler); err != nil {
-					t.Fatal(err)
-				}
-				var err error
-				handler, err = app.httpHandler(nil, nil)
-				if err != nil {
-					t.Fatal(err)
-				}
+				handler = app.corsAndRecovery(handler)
 			}
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, httptest.NewRequest("GET", "/panic", nil))

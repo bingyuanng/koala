@@ -28,46 +28,46 @@ type configFields struct {
 	element *configFields
 }
 
-func indexFields(t reflect.Type, names []string, prefix string, index map[string]fieldPath, seen map[reflect.Type]bool) (*configFields, error) {
-	schema := &configFields{typ: t}
-	for t.Kind() == reflect.Pointer {
-		t = t.Elem()
+func indexFields(fieldType reflect.Type, names []string, prefix string, index map[string]fieldPath, seen map[reflect.Type]bool) (*configFields, error) {
+	schema := &configFields{typ: fieldType}
+	for fieldType.Kind() == reflect.Pointer {
+		fieldType = fieldType.Elem()
 	}
-	schema.kind = t.Kind()
-	if reflect.PointerTo(t).Implements(reflect.TypeFor[json.Unmarshaler]()) || reflect.PointerTo(t).Implements(reflect.TypeFor[encoding.TextUnmarshaler]()) {
+	schema.kind = fieldType.Kind()
+	if reflect.PointerTo(fieldType).Implements(reflect.TypeFor[json.Unmarshaler]()) || reflect.PointerTo(fieldType).Implements(reflect.TypeFor[encoding.TextUnmarshaler]()) {
 		return schema, nil
 	}
-	if seen[t] {
+	if seen[fieldType] {
 		return nil, fmt.Errorf("config: recursive configuration types are unsupported")
 	}
-	seen[t] = true
-	defer delete(seen, t)
-	switch t.Kind() {
+	seen[fieldType] = true
+	defer delete(seen, fieldType)
+	switch fieldType.Kind() {
 	case reflect.Map, reflect.Slice, reflect.Array:
 		// Container values use the same JSON rules, but do not create environment paths.
 		var err error
-		schema.element, err = indexFields(t.Elem(), names, prefix, nil, seen)
+		schema.element, err = indexFields(fieldType.Elem(), names, prefix, nil, seen)
 		return schema, err
 	case reflect.Struct:
 	default:
 		return schema, nil
 	}
 	schema.fields = map[string]configField{}
-	for i := 0; i < t.NumField(); i++ {
-		f := t.Field(i)
-		if !f.IsExported() {
+	for i := 0; i < fieldType.NumField(); i++ {
+		structField := fieldType.Field(i)
+		if !structField.IsExported() {
 			continue
 		}
-		tag := strings.Split(f.Tag.Get("json"), ",")
+		tag := strings.Split(structField.Tag.Get("json"), ",")
 		name := tag[0]
 		if name == "-" {
 			continue
 		}
-		if f.Anonymous && name == "" {
+		if structField.Anonymous && name == "" {
 			return nil, fmt.Errorf("config: anonymous fields require a named configuration section")
 		}
 		if name == "" {
-			name = f.Name
+			name = structField.Name
 		}
 		if strings.Contains(name, "__") || strings.ContainsAny(name, ".=") {
 			return nil, fmt.Errorf("config: ambiguous JSON field name")
@@ -82,7 +82,7 @@ func indexFields(t reflect.Type, names []string, prefix string, index map[string
 		if _, exists := index[key]; exists {
 			return nil, fmt.Errorf("config: environment path collision at %s", key)
 		}
-		child, err := indexFields(f.Type, path, prefix, index, seen)
+		child, err := indexFields(structField.Type, path, prefix, index, seen)
 		if err != nil {
 			return nil, err
 		}
@@ -104,11 +104,11 @@ func indexFields(t reflect.Type, names []string, prefix string, index map[string
 	return schema, nil
 }
 
-func (s *configFields) field(name string) (string, configField, bool) {
-	if field, ok := s.fields[name]; ok {
+func (schema *configFields) field(name string) (string, configField, bool) {
+	if field, ok := schema.fields[name]; ok {
 		return name, field, true
 	}
-	for canonical, field := range s.fields {
+	for canonical, field := range schema.fields {
 		if strings.EqualFold(canonical, name) {
 			return canonical, field, true
 		}
@@ -116,15 +116,15 @@ func (s *configFields) field(name string) (string, configField, bool) {
 	return "", configField{}, false
 }
 
-func (s *configFields) merge(base, source any, path string, present map[string]bool) (any, error) {
-	if s.element != nil {
+func (schema *configFields) merge(base, source any, path string, suppliedPaths map[string]bool) (any, error) {
+	if schema.element != nil {
 		// Replace the container, while normalizing struct fields inside its values.
-		present[path] = true
+		suppliedPaths[path] = true
 		switch source := source.(type) {
 		case map[string]any:
 			for key, value := range source {
 				var err error
-				source[key], err = s.element.merge(nil, value, path+"."+key, present)
+				source[key], err = schema.element.merge(nil, value, path+"."+key, suppliedPaths)
 				if err != nil {
 					return nil, err
 				}
@@ -133,7 +133,7 @@ func (s *configFields) merge(base, source any, path string, present map[string]b
 		case []any:
 			for i, value := range source {
 				var err error
-				source[i], err = s.element.merge(nil, value, path, present)
+				source[i], err = schema.element.merge(nil, value, path, suppliedPaths)
 				if err != nil {
 					return nil, err
 				}
@@ -142,18 +142,18 @@ func (s *configFields) merge(base, source any, path string, present map[string]b
 		}
 	}
 	object, isObject := source.(map[string]any)
-	if s.fields == nil || !isObject {
-		markPresent(source, path, present)
+	if schema.fields == nil || !isObject {
+		markPresent(source, path, suppliedPaths)
 		return source, nil // Maps, arrays and scalars replace their previous value.
 	}
 	merged, _ := base.(map[string]any)
 	if merged == nil {
 		merged = map[string]any{}
 	}
-	present[path] = true
+	suppliedPaths[path] = true
 	seen := map[string]bool{}
 	for name, value := range object {
-		canonical, field, ok := s.field(name)
+		canonical, field, ok := schema.field(name)
 		if !ok {
 			return nil, fmt.Errorf("config: unknown JSON field %q", name)
 		}
@@ -166,7 +166,7 @@ func (s *configFields) merge(base, source any, path string, present map[string]b
 		}
 		seen[canonical] = true
 		var err error
-		merged[canonical], err = field.schema.merge(merged[canonical], value, child, present)
+		merged[canonical], err = field.schema.merge(merged[canonical], value, child, suppliedPaths)
 		if err != nil {
 			return nil, err
 		}
@@ -174,8 +174,8 @@ func (s *configFields) merge(base, source any, path string, present map[string]b
 	return merged, nil
 }
 
-func markPresent(value any, path string, present map[string]bool) {
-	present[path] = true
+func markPresent(value any, path string, suppliedPaths map[string]bool) {
+	suppliedPaths[path] = true
 	switch value := value.(type) {
 	case map[string]any:
 		for name, child := range value {
@@ -183,11 +183,11 @@ func markPresent(value any, path string, present map[string]bool) {
 			if path != "" {
 				childPath = path + "." + name
 			}
-			markPresent(child, childPath, present)
+			markPresent(child, childPath, suppliedPaths)
 		}
 	case []any:
 		for _, child := range value {
-			markPresent(child, path, present)
+			markPresent(child, path, suppliedPaths)
 		}
 	}
 }
@@ -195,19 +195,19 @@ func markPresent(value any, path string, present map[string]bool) {
 // JSON cannot represent unexported or json:"-" defaults. Retain those fields
 // from the constructor while taking every supplied JSON field from the fresh
 // typed result. No JSON matching or aggregate resetting is needed here.
-func (s *configFields) preserveDefaults(defaults, decoded reflect.Value, path string, present map[string]bool) reflect.Value {
-	if !present[path] {
+func (schema *configFields) preserveDefaults(defaults, decoded reflect.Value, path string, suppliedPaths map[string]bool) reflect.Value {
+	if !suppliedPaths[path] {
 		return defaults
 	}
-	if s.fields == nil {
+	if schema.fields == nil {
 		return decoded
 	}
-	var pointers []reflect.Type
+	var pointerTypes []reflect.Type
 	for decoded.Kind() == reflect.Pointer {
 		if decoded.IsNil() {
 			return decoded
 		}
-		pointers = append(pointers, decoded.Type())
+		pointerTypes = append(pointerTypes, decoded.Type())
 		decoded = decoded.Elem()
 		if defaults.IsNil() {
 			defaults = reflect.Zero(defaults.Type().Elem())
@@ -217,17 +217,17 @@ func (s *configFields) preserveDefaults(defaults, decoded reflect.Value, path st
 	}
 	merged := reflect.New(decoded.Type()).Elem()
 	merged.Set(defaults)
-	for name, field := range s.fields {
+	for name, field := range schema.fields {
 		child := name
 		if path != "" {
 			child = path + "." + name
 		}
-		merged.Field(field.index).Set(field.schema.preserveDefaults(defaults.Field(field.index), decoded.Field(field.index), child, present))
+		merged.Field(field.index).Set(field.schema.preserveDefaults(defaults.Field(field.index), decoded.Field(field.index), child, suppliedPaths))
 	}
-	for i := len(pointers) - 1; i >= 0; i-- {
+	for i := len(pointerTypes) - 1; i >= 0; i-- {
 		pointer := reflect.New(merged.Type())
 		pointer.Elem().Set(merged)
-		merged = pointer.Convert(pointers[i])
+		merged = pointer.Convert(pointerTypes[i])
 	}
 	return merged
 }

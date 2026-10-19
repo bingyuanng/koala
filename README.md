@@ -81,9 +81,11 @@ the relevant template changes manually.
 Commit your application before upgrading, update both versions, review the release
 notes and tool pins, regenerate, and inspect the diff. Commit generated transport
 code, OpenAPI, the bootstrap registry, `.koala/generation.json`, and
-`.koala/descriptors.bin` together with the contract changes. Generation refuses to
-overwrite modified owned outputs; resolve those edits before retrying. Run the
-application's tests and verify both transports before deploying. See the Notion
+`.koala/descriptors.bin` together with the contract changes. Generation overwrites
+Koala-owned outputs, including local edits, and removes obsolete owned outputs.
+Conflicting unowned files are rejected; edit application source and protobuf
+contracts instead of generated files. Run the application's tests and verify both
+transports before deploying. See the Notion
 upgrade guide for the full procedure and rollback guidance.
 
 ## Working on Koala
