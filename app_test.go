@@ -287,6 +287,7 @@ func TestTraceParentsAndAuthParity(t *testing.T) {
 		return ctx, nil
 	}
 	a, conn, stop := start(t, testConfig(), koala.Options{Logger: slog.New(slog.NewJSONHandler(&logs, nil)), Authenticate: hook, Telemetry: &observability.Providers{Traces: tp, Metrics: mp}})
+	stop = sync.OnceFunc(stop)
 	defer stop()
 	client := userv1.NewUserServiceClient(conn)
 	if _, e := client.GetUser(context.Background(), &userv1.GetUserRequest{Id: "1"}); status.Code(e) != codes.Unauthenticated {
@@ -309,6 +310,9 @@ func TestTraceParentsAndAuthParity(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatal(resp.StatusCode)
 	}
+	// Receiving a response does not wait for the server's stats.End callback.
+	// Drain both transports so all spans have ended before reading the exporter.
+	stop()
 	spans := exp.GetSpans()
 	directContinued := false
 	for _, span := range spans {
