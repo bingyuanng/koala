@@ -256,7 +256,7 @@ func ReportFallbacks(ctx context.Context, root string, out io.Writer) error {
 	if e != nil {
 		return e
 	}
-	services, e := servicesFromManifest(root)
+	services, e := servicesFromManifest(root, c)
 	if e != nil {
 		return e
 	}

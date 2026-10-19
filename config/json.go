@@ -5,66 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
+
+	"github.com/bingyuanng/koala/internal/configjson"
 )
 
-// Source JSON is parsed once, before decoding can discard duplicate keys or nulls.
-// Number tokens retain their text so large integers do not pass through float64.
 func parseJSON(raw []byte, path string) (any, error) {
-	d := json.NewDecoder(bytes.NewReader(raw))
-	d.UseNumber()
-	value, err := parseValue(d)
+	value, err := configjson.Decode(raw)
 	if err != nil {
-		return nil, fmt.Errorf("config: invalid or duplicate JSON at %s", path)
-	}
-	if _, err := d.Token(); err != io.EOF {
-		return nil, fmt.Errorf("config: trailing JSON at %s", path)
+		return nil, fmt.Errorf("config: invalid, duplicate or trailing JSON at %s", path)
 	}
 	return value, nil
-}
-
-func parseValue(d *json.Decoder) (any, error) {
-	token, err := d.Token()
-	if err != nil {
-		return nil, err
-	}
-	if token == nil {
-		return nil, errors.New("null is not a configuration value")
-	}
-	switch token {
-	case json.Delim('{'):
-		object := map[string]any{}
-		for d.More() {
-			key, err := d.Token()
-			if err != nil {
-				return nil, err
-			}
-			name := key.(string)
-			if _, duplicate := object[name]; duplicate {
-				return nil, errors.New("duplicate key")
-			}
-			object[name], err = parseValue(d)
-			if err != nil {
-				return nil, err
-			}
-		}
-		_, err := d.Token()
-		return object, err
-	case json.Delim('['):
-		array := []any{}
-		for d.More() {
-			value, err := parseValue(d)
-			if err != nil {
-				return nil, err
-			}
-			array = append(array, value)
-		}
-		_, err := d.Token()
-		return array, err
-	default:
-		return token, nil
-	}
 }
 
 func defaultsTree(defaults any) (any, error) {

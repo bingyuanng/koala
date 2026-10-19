@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/bingyuanng/koala/config"
+	"github.com/bingyuanng/koala/internal/configjson"
 )
 
 func configEnvJSONCommand(out io.Writer) error {
@@ -117,14 +117,7 @@ func environmentValue(raw string, schema reflect.Type) (any, error) {
 	if schema == nil && !strings.HasPrefix(strings.TrimSpace(raw), "{") && !strings.HasPrefix(strings.TrimSpace(raw), "[") {
 		return raw, nil
 	}
-	decoder := json.NewDecoder(bytes.NewBufferString(raw))
-	decoder.UseNumber()
-	value, err := readConfigValue(decoder)
-	if err == nil {
-		if _, tailErr := decoder.Token(); tailErr != io.EOF {
-			err = fmt.Errorf("invalid JSON value")
-		}
-	}
+	value, err := configjson.Decode([]byte(raw))
 	if schema == nil {
 		// Without an application schema, retain scalar text and malformed JSON as-is.
 		if err != nil {

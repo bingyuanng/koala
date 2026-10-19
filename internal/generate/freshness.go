@@ -113,7 +113,7 @@ func CheckFresh(ctx context.Context, root string) error {
 	if e != nil || m.Version != 1 {
 		return fmt.Errorf("generated artifacts missing; run koala gen")
 	}
-	services, e := servicesFromManifest(root)
+	services, e := servicesFromManifest(root, c)
 	if e != nil {
 		return e
 	}
@@ -134,14 +134,10 @@ func CheckFresh(ctx context.Context, root string) error {
 }
 
 // Retain descriptors as an owned generation output for offline freshness checks.
-func servicesFromManifest(root string) ([]service, error) {
+func servicesFromManifest(root string, c Config) ([]service, error) {
 	b, e := os.ReadFile(filepath.Join(root, ".koala/descriptors.bin"))
 	if e != nil {
 		return nil, fmt.Errorf("descriptor snapshot missing; run koala gen")
-	}
-	c, e := readConfig(root)
-	if e != nil {
-		return nil, e
 	}
 	return servicesFrom(root, c, b)
 }

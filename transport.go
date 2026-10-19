@@ -46,18 +46,6 @@ func (a *App) transportCredentials() (grpc.ServerOption, credentials.TransportCr
 	return serverOption, dialCredentials, nil
 }
 
-func waitForGateway(ctx context.Context, conn *grpc.ClientConn) error {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	conn.Connect()
-	for state := conn.GetState(); state != connectivity.Ready; state = conn.GetState() {
-		if !conn.WaitForStateChange(ctx, state) {
-			return fmt.Errorf("koala: gateway connection: %w", ctx.Err())
-		}
-	}
-	return nil
-}
-
 func (a *App) gatewayServer(ctx context.Context, conn *grpc.ClientConn) (*http.Server, error) {
 	gateway := runtime.NewServeMux(runtime.WithErrorHandler(gatewayErrorHandler), runtime.WithIncomingHeaderMatcher(func(key string) (string, bool) {
 		if strings.EqualFold(key, "x-request-id") {
@@ -70,8 +58,13 @@ func (a *App) gatewayServer(ctx context.Context, conn *grpc.ClientConn) (*http.S
 			return nil, fmt.Errorf("koala: gateway registration: %w", err)
 		}
 	}
-	if err := waitForGateway(ctx, conn); err != nil {
-		return nil, err
+	preflight, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	conn.Connect()
+	for state := conn.GetState(); state != connectivity.Ready; state = conn.GetState() {
+		if !conn.WaitForStateChange(preflight, state) {
+			return nil, fmt.Errorf("koala: gateway connection: %w", preflight.Err())
+		}
 	}
 	handler, err := a.httpHandler(gateway, a.options.Telemetry)
 	if err != nil {

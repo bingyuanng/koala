@@ -2,6 +2,7 @@ package cli
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os/exec"
@@ -62,7 +63,16 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "koala: mise is required on PATH; install and activate it: https://mise.jdx.dev/getting-started.html")
 			return 1
 		}
-		if err := operation(args, stdout, stderr); err != nil {
+		var err error
+		switch args[0] {
+		case "new":
+			err = newCommand(args[1:], stdout, stderr)
+		case "config":
+			err = configCommand(args[1:], stdout, stderr)
+		default:
+			err = generateCommand(args[0], args[1:], stdout, stderr)
+		}
+		if err != nil {
 			fmt.Fprintln(stderr, err)
 			var exit *exec.ExitError
 			if errors.As(err, &exit) {
@@ -78,4 +88,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stderr, "unsupported command %q; run koala help\n", args[0])
 	return 2
+}
+
+func flags(name string, out io.Writer) *flag.FlagSet {
+	f := flag.NewFlagSet(name, flag.ContinueOnError)
+	f.SetOutput(out)
+	return f
 }

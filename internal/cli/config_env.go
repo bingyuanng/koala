@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/bingyuanng/koala/config"
+	"github.com/bingyuanng/koala/internal/configjson"
 	"github.com/bingyuanng/koala/internal/generate"
 )
 
@@ -35,15 +35,10 @@ func configEnvCommand(args []string, out io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("cannot read %s", name)
 	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.UseNumber()
-	value, err := readConfigValue(decoder)
+	value, err := configjson.Decode(data)
 	values, object := value.(map[string]any)
 	if err != nil || !object {
-		return fmt.Errorf("%s must contain a JSON object with unique keys and no null values", name)
-	}
-	if _, err := decoder.Token(); err != io.EOF {
-		return fmt.Errorf("%s contains invalid or trailing JSON", name)
+		return fmt.Errorf("%s must contain a JSON object with unique keys and no null or trailing values", name)
 	}
 	lines := []string{"# From " + name, "KOALA_ENV=" + args[0]}
 	seen := map[string]bool{"KOALA_ENV": true}
@@ -52,58 +47,6 @@ func configEnvCommand(args []string, out io.Writer) error {
 	}
 	_, err = fmt.Fprintln(out, strings.Join(lines, "\n"))
 	return err
-}
-
-// Read objects without silently replacing duplicate keys, preserving integer precision.
-func readConfigValue(decoder *json.Decoder) (any, error) {
-	token, err := decoder.Token()
-	if err != nil || token == nil {
-		return nil, errors.New("invalid JSON configuration")
-	}
-	delim, compound := token.(json.Delim)
-	if !compound {
-		return token, nil
-	}
-	switch delim {
-	case '{':
-		values := map[string]any{}
-		for decoder.More() {
-			token, err := decoder.Token()
-			if err != nil {
-				return nil, err
-			}
-			key, ok := token.(string)
-			if !ok {
-				return nil, errors.New("invalid JSON object key")
-			}
-			if _, exists := values[key]; exists {
-				return nil, errors.New("duplicate JSON object key")
-			}
-			value, err := readConfigValue(decoder)
-			if err != nil {
-				return nil, err
-			}
-			values[key] = value
-		}
-		if _, err := decoder.Token(); err != nil {
-			return nil, err
-		}
-		return values, nil
-	case '[':
-		values := []any{}
-		for decoder.More() {
-			value, err := readConfigValue(decoder)
-			if err != nil {
-				return nil, err
-			}
-			values = append(values, value)
-		}
-		if _, err := decoder.Token(); err != nil {
-			return nil, err
-		}
-		return values, nil
-	}
-	return nil, errors.New("invalid JSON configuration")
 }
 
 // Known framework structs use nested keys. Maps, arrays, and application objects

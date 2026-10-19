@@ -13,6 +13,7 @@ import (
 	"github.com/bingyuanng/koala/internal/startup"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 func (a *App) Run(ctx context.Context) (result error) {
@@ -48,10 +49,15 @@ func (a *App) Run(ctx context.Context) (result error) {
 			shutdownCancel()
 		}
 	}()
-	validator, err := a.prepareRequests()
+	services := make([]protoreflect.ServiceDescriptor, len(a.registrations))
+	for i, r := range a.registrations {
+		services[i] = r.Descriptor
+	}
+	methods, validator, err := prepareRequests(a.requests, services)
 	if err != nil {
 		return err
 	}
+	a.methods = methods
 	serverOptions := []grpc.ServerOption{telemetry.ServerOption(func(method string) bool {
 		_, known := a.methods[method]
 		return known
@@ -149,7 +155,23 @@ func (a *App) Run(ctx context.Context) (result error) {
 	}
 	stop()
 	shutdown := startShutdown()
-	result = errors.Join(result, drainTransports(shutdown, httpServer, conn, server))
+	if httpServer != nil {
+		if e := httpServer.Shutdown(shutdown); e != nil {
+			_ = httpServer.Close()
+			result = errors.Join(result, e)
+		}
+	}
+	if conn != nil {
+		_ = conn.Close()
+	}
+	drained := make(chan struct{})
+	go func() { server.GracefulStop(); close(drained) }()
+	select {
+	case <-drained:
+	case <-shutdown.Done():
+		server.Stop()
+		result = errors.Join(result, shutdown.Err())
+	}
 	a.logger.Info("application stopped")
 	return result
 }
@@ -192,26 +214,4 @@ func registerGateway(ctx context.Context, r Registration, m *runtime.ServeMux, c
 
 func panicError(stage string, recovered any) error {
 	return fmt.Errorf("koala: %s panicked (%T)\n%s", stage, recovered, debug.Stack())
-}
-
-func drainTransports(shutdown context.Context, httpServer *http.Server, conn *grpc.ClientConn, server *grpc.Server) error {
-	var result error
-	if httpServer != nil {
-		if e := httpServer.Shutdown(shutdown); e != nil {
-			_ = httpServer.Close()
-			result = errors.Join(result, e)
-		}
-	}
-	if conn != nil {
-		_ = conn.Close()
-	}
-	drained := make(chan struct{})
-	go func() { server.GracefulStop(); close(drained) }()
-	select {
-	case <-drained:
-	case <-shutdown.Done():
-		server.Stop()
-		result = errors.Join(result, shutdown.Err())
-	}
-	return result
 }

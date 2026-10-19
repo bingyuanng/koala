@@ -52,10 +52,6 @@ func generateCommand(name string, args []string, out, errout io.Writer) error {
 	if e = generate.ReportFallbacks(ctx, root, out); e != nil {
 		return e
 	}
-	return startApplication(ctx, root, out, errout)
-}
-
-func startApplication(ctx context.Context, root string, out, errout io.Writer) error {
 	dir, e := os.MkdirTemp("", "koala-start-")
 	if e != nil {
 		return e
