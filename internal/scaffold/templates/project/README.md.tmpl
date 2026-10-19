@@ -11,6 +11,8 @@ koala gen
 koala start
 ```
 
+`mise install` also installs the pinned `gopls` language server for your editor.
+
 With `KOALA_ENV` unset or empty, the app defaults to `dev`. It loads defaults from
 `internal/config/config.go`, then `config.dev.json`, then `KOALA_` environment
 overrides. The development JSON file must exist.
