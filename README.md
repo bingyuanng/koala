@@ -6,21 +6,16 @@ contracts and annotated Go service factories. The runtime provides request
 validation, deadlines, structured logging, OpenTelemetry instrumentation, and
 embedded OpenAPI documentation.
 
-Koala is in prerelease. The published version is
-[`v1.0.0-rc.1`](https://github.com/bingyuanng/koala/releases/tag/v1.0.0-rc.1).
-APIs, configuration, CLI behavior, templates, and generated output may change
-before stable 1.0. Pin an explicit version and review changes before upgrading.
-
 ## Quickstart
 
 Install and activate [mise](https://mise.jdx.dev/getting-started.html), then install
-Go and the versioned Koala CLI. The repository is currently private, so source
+Go and the Koala CLI. The repository is currently private, so source
 installation requires repository access and Go private-module configuration until
 it is made public:
 
 ```sh
 mise use -g go@1.26.9
-go install github.com/bingyuanng/koala/cmd/koala@v1.0.0-rc.1
+go install github.com/bingyuanng/koala/cmd/koala@latest
 export PATH="$(go env GOPATH)/bin:$PATH"
 koala version
 koala new my-api --module example.com/my-api
@@ -32,8 +27,9 @@ koala start
 ```
 
 Release archives for Linux and macOS on amd64 and arm64 are also available on the
-release page to users with access. Use the explicit prerelease version rather
-than `@latest`.
+[latest release page](https://github.com/bingyuanng/koala/releases/latest) to users
+with access. For reproducible installation, replace `@latest` with an explicit
+release tag.
 
 The CLI creates an application-owned health service and pins the matching runtime
 version. Generation uses pinned Buf plugins and requires access to the Buf Schema
@@ -54,7 +50,7 @@ application with Ctrl-C.
 Add a service with `koala new service Accounts`, edit its protobuf contract, run
 `koala gen`, and implement its Go methods. Editing only an existing RPC's business
 logic requires a rebuild with `koala start`. Contract or factory changes require
-generation. The first release supports unary RPCs and standard HTTP verbs with
+generation. Koala supports unary RPCs and standard HTTP verbs with
 simple path variables; streaming and wildcard/custom HTTP paths are unsupported.
 
 ## Documentation
@@ -71,12 +67,12 @@ These pages are public and can be read without a Notion account.
 
 ## Compatibility and upgrades
 
-Use matching CLI and runtime versions. During prerelease, an upgrade may require
-Go API changes, configuration changes, template edits, and regeneration. Existing
-applications own their startup, configuration, dependencies, service implementations,
-and protobuf contracts. Koala does not automatically migrate those files when its
-templates change. Compare a temporary project created by the target CLI and merge
-the relevant template changes manually.
+Use matching CLI and runtime versions. Review the
+[release notes](https://github.com/bingyuanng/koala/releases) before upgrading.
+Applications own their startup, configuration, dependencies, service
+implementations, and protobuf contracts. Koala does not automatically migrate
+those files when its templates change. Compare a temporary project created by
+the target CLI and merge the relevant template changes manually.
 
 Commit your application before upgrading, update both versions, review the release
 notes and tool pins, regenerate, and inspect the diff. Commit generated transport
@@ -86,7 +82,8 @@ Koala-owned outputs, including local edits, and removes obsolete owned outputs.
 Conflicting unowned files are rejected; edit application source and protobuf
 contracts instead of generated files. Run the application's tests and verify both
 transports before deploying. See the Notion
-upgrade guide for the full procedure and rollback guidance.
+[upgrade guide](https://bingsthought.notion.site/Configuration-and-CLI-guide-3f62a93ebee0819f83badea55aabffa6)
+for migration details, the full procedure, and rollback guidance.
 
 ## Working on Koala
 
@@ -100,6 +97,25 @@ mise install
 go run ./cmd/koala help
 ```
 
+To try the current checkout in a separate application, build the development CLI
+and explicitly select this checkout as its runtime:
+
+```sh
+koala_checkout=$(pwd)
+go build -o /tmp/koala ./cmd/koala
+cd /tmp
+/tmp/koala new my-api --module example.com/my-api --framework-path "$koala_checkout"
+cd my-api
+mise trust
+mise install
+/tmp/koala gen
+/tmp/koala start
+```
+
+Choose an unused project directory. Development CLI builds require either
+`--framework-path` or `--framework-version`; release builds accept
+`--framework-version` and default to their matching runtime version.
+
 Run the Go checks with:
 
 ```sh
@@ -107,7 +123,13 @@ go build ./...
 go test ./...
 go vet ./...
 go test -race ./...
+go run ./scripts/check-generation
+go run ./scripts/check-workflow
 ```
+
+The generation and workflow checks require Buf Schema Registry access or cached
+schema dependencies. For local generator execution, run
+`mise run local-plugins` and pass `--local-plugins .tools/plugins` to each check.
 
 ## License
 
