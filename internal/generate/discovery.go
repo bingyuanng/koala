@@ -48,7 +48,10 @@ func servicesFrom(root string, cfg Config, descriptors []byte) ([]service, error
 	var result []service
 	for _, file := range descriptorSet.File {
 		if _, err := os.Stat(filepath.Join(root, protoDirectory, filepath.FromSlash(file.GetName()))); err != nil {
-			continue
+			if os.IsNotExist(err) {
+				continue // Imported descriptors have no application-owned source.
+			}
+			return nil, fmt.Errorf("inspect protobuf source %s: %w", file.GetName(), err)
 		}
 		for _, descriptor := range file.Service {
 			name := file.GetPackage() + "." + descriptor.GetName()

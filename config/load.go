@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+
+	"github.com/bingyuanng/koala/internal/safefile"
 )
 
 // Options constructs a fresh application configuration. Required lists JSON
@@ -99,9 +101,9 @@ func load[T any](options Options[T], readFile bool) (T, error) {
 		if file == "" {
 			file = "config.dev.json"
 		}
-		raw, err := os.ReadFile(file)
+		raw, err := safefile.ReadFile(file, "config: cannot read configuration file")
 		if err != nil {
-			return zero, fmt.Errorf("config: cannot read configuration file")
+			return zero, err
 		}
 		source, err := parseJSON(raw, "")
 		if err != nil {
