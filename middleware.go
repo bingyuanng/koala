@@ -16,12 +16,10 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
-	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 )
 
 // Only this app's gateway can suppress the duplicate RPC completion record.
@@ -124,30 +122,6 @@ func applyRequestHook(parent context.Context, method string, hook Hook) (context
 		ctx = trace.ContextWithSpan(ctx, trace.SpanFromContext(parent))
 	}
 	return ctx, func() { stop(); cancel() }, nil
-}
-
-func validateRequest(validator protovalidate.Validator, request any) error {
-	message, ok := request.(proto.Message)
-	if !ok {
-		return nil
-	}
-	err := validator.Validate(message)
-	if err == nil {
-		return nil
-	}
-	var violations *protovalidate.ValidationError
-	if !errors.As(err, &violations) {
-		return status.Error(codes.Internal, "request validation unavailable")
-	}
-	details := &errdetails.BadRequest{}
-	for _, violation := range violations.Violations {
-		details.FieldViolations = append(details.FieldViolations, &errdetails.BadRequest_FieldViolation{
-			Field:       protovalidate.FieldPathString(violation.Proto.GetField()),
-			Description: "constraint violated: " + violation.Proto.GetRuleId(),
-		})
-	}
-	result, _ := status.New(codes.InvalidArgument, "request validation failed").WithDetails(details)
-	return result.Err()
 }
 
 func (a *App) requestError(ctx context.Context, method string, err error) error {

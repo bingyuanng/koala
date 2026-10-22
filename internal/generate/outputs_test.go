@@ -16,7 +16,7 @@ func TestFailedGenerationRestoresOutputsAndCanRetry(t *testing.T) {
 	t.Setenv("GOWORK", "off")
 	root := t.TempDir()
 	files := map[string][]byte{
-		"go.mod":     []byte("module example.com/app\n\ngo 1.26.9\n"),
+		"go.mod":     []byte("module example.com/app\n\ngo 1.26.10\n"),
 		"koala.yaml": []byte("version: v1\ndependency_type: example.com/app/internal/missing.Dependencies\n"),
 		"buf.yaml":   nil, "buf.lock": nil, "buf.gen.yaml": nil,
 		"gen/go/old.pb.go":                   []byte(header + "package old\n"),

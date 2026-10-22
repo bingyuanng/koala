@@ -1,5 +1,5 @@
 {
-  "go": "1.26.9",
+  "go": "1.26.10",
   "buf": "1.73.0",
   "plugins": {
     "buf.build/protocolbuffers/go": "v1.36.12",

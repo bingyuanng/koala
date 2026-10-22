@@ -14,7 +14,7 @@ installation requires repository access and Go private-module configuration unti
 it is made public:
 
 ```sh
-mise use -g go@1.26.9
+mise use -g go@1.26.10
 go install github.com/bingyuanng/koala/cmd/koala@latest
 export PATH="$(go env GOPATH)/bin:$PATH"
 koala version
