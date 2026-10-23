@@ -15,39 +15,31 @@ import (
 
 func TestEmbeddedTemplates(t *testing.T) {
 	t.Chdir(t.TempDir())
-	for _, kind := range []string{"project", "service"} {
-		data := Data{ModulePath: "example.com/import-path", ProjectName: "Display Name", ServiceName: "Accounts", FrameworkVersion: "v0.1.2"}
-		files, err := Render(kind, data)
-		if err != nil {
-			t.Fatal(err)
+	data := Data{ModulePath: "example.com/import-path", ProjectName: "Display Name", FrameworkVersion: "v0.1.2"}
+	files, err := Render(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := Render(data)
+	if err != nil || !reflect.DeepEqual(files, again) {
+		t.Fatal("rendering is not deterministic")
+	}
+	joined := ""
+	foundDotfile := false
+	for _, file := range files {
+		if file.Ownership != "application" && !((strings.HasPrefix(file.Path, "gen/") || strings.HasPrefix(file.Path, ".koala/") || file.Path == "internal/bootstrap/services_gen.go") && file.Ownership == "generated") {
+			t.Fatalf("incorrect ownership for %s: %s", file.Path, file.Ownership)
 		}
-		again, err := Render(kind, data)
-		if err != nil || !reflect.DeepEqual(files, again) {
-			t.Fatal("rendering is not deterministic")
+		joined += file.Content
+		if file.Path == ".gitignore" {
+			foundDotfile = true
 		}
-		joined := ""
-		foundDotfile := false
-		for _, f := range files {
-			if f.Ownership != "application" && !((strings.HasPrefix(f.Path, "gen/") || strings.HasPrefix(f.Path, ".koala/") || f.Path == "internal/bootstrap/services_gen.go") && f.Ownership == "generated") {
-				t.Fatalf("incorrect ownership for %s: %s", f.Path, f.Ownership)
-			}
-			joined += f.Content
-			if f.Path == ".gitignore" {
-				foundDotfile = true
-			}
-			if strings.HasSuffix(f.Path, ".tmpl") {
-				t.Fatal("template suffix leaked")
-			}
+		if strings.HasSuffix(file.Path, ".tmpl") {
+			t.Fatal("template suffix leaked")
 		}
-		if !strings.Contains(joined, data.ModulePath) {
-			t.Fatal("module path lost")
-		}
-		if kind == "project" && (!foundDotfile || !strings.Contains(joined, data.ProjectName) || !strings.Contains(joined, data.FrameworkVersion)) {
-			t.Fatal("project data or dotfile lost")
-		}
-		if kind == "service" && (!strings.Contains(joined, "UnimplementedAccountsServer") || !strings.Contains(joined, "//koala:service accounts.v1.Accounts") || !strings.Contains(joined, data.ModulePath+"/gen/go/accounts/v1")) {
-			t.Fatal("service mapping lost")
-		}
+	}
+	if !foundDotfile || !strings.Contains(joined, data.ModulePath) || !strings.Contains(joined, data.ProjectName) || !strings.Contains(joined, data.FrameworkVersion) {
+		t.Fatal("project data or dotfile lost")
 	}
 }
 
@@ -74,7 +66,7 @@ func TestRenderErrorsAreAtomic(t *testing.T) {
 			}
 		})
 	}
-	if _, err := Render("project", Data{}); err == nil {
+	if _, err := Render(Data{}); err == nil {
 		t.Fatal("empty inputs accepted")
 	}
 }
@@ -86,28 +78,23 @@ func TestRenderedProjectBuilds(t *testing.T) {
 		t.Fatal(err)
 	}
 	project := t.TempDir()
-	for _, kind := range []string{"project", "service"} {
-		files, err := Render(kind, Data{
-			ModulePath: "example.com/independent", ProjectName: "Display Name",
-			ServiceName: "UserService", FrameworkVersion: "v0.1.0",
-		})
-		if err != nil {
+	files, err := Render(Data{
+		ModulePath: "example.com/independent", ProjectName: "Display Name", FrameworkVersion: "v0.1.0",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		target := filepath.Join(project, file.Path)
+		if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
 			t.Fatal(err)
 		}
-		for _, file := range files {
-			target := filepath.Join(project, file.Path)
-			if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(target, []byte(file.Content), 0600); err != nil {
-				t.Fatal(err)
-			}
+		if err := os.WriteFile(target, []byte(file.Content), 0600); err != nil {
+			t.Fatal(err)
 		}
 	}
-	for _, fixture := range []string{"internal/scaffold/testdata/health/gen/go", "internal/testdata/runtime/gen/go"} {
-		if err := os.CopyFS(filepath.Join(project, "gen/go"), os.DirFS(filepath.Join(root, fixture))); err != nil {
-			t.Fatal(err)
-		}
+	if err := os.CopyFS(filepath.Join(project, "gen/go"), os.DirFS(filepath.Join(root, "internal/scaffold/testdata/health/gen/go"))); err != nil {
+		t.Fatal(err)
 	}
 	// Applications extend their own Config without editing Koala or adding conversions.
 	configPath := filepath.Join(project, "internal/config/config.go")
@@ -201,8 +188,8 @@ func TestOwnedSourcePolicyAndCustomSettings(t *testing.T) {
 }
 
 func TestProjectLayoutAndDefaults(t *testing.T) {
-	data := Data{ModulePath: "example.com/app", ProjectName: `quoted "name"`, ServiceName: "UserService", FrameworkVersion: "v0.1.0"}
-	files, err := Render("project", data)
+	data := Data{ModulePath: "example.com/app", ProjectName: `quoted "name"`, FrameworkVersion: "v0.1.0"}
+	files, err := Render(data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,12 +217,5 @@ func TestProjectLayoutAndDefaults(t *testing.T) {
 	expected.App.Name = data.ProjectName
 	if !reflect.DeepEqual(cfg, expected) {
 		t.Fatalf("template defaults = %#v, want %#v", cfg, expected)
-	}
-	service, err := Render("service", data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(service) != 2 || service[0].Path != "internal/service/user/service.go" || service[1].Path != "proto/user/v1/user.proto" {
-		t.Fatalf("service layout = %v", service)
 	}
 }

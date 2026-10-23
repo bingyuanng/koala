@@ -47,9 +47,10 @@ Both return a JSON status of `ok` once the application is ready. Open
 default listeners use HTTP port 8080 and gRPC port 9090 on loopback. Stop the
 application with Ctrl-C.
 
-Add a service with `koala new service Accounts`, edit its protobuf contract, run
-`koala gen`, and implement its Go methods. Editing only an existing RPC's business
-logic requires a rebuild with `koala start`. Contract or factory changes require
+To add a service, define its protobuf contract under `proto/` and run `koala gen`.
+Generation creates its Go implementation shell and registration. Implement the
+RPC methods in that shell. Editing only an existing RPC's business logic requires
+a rebuild with `koala start`. Contract or factory changes require
 generation. Koala supports unary RPCs and standard HTTP verbs with
 simple path variables; streaming and wildcard/custom HTTP paths are unsupported.
 

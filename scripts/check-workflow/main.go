@@ -302,12 +302,13 @@ func checkWorkflow() {
 	}
 	gen(false, false)
 	s.Compare(digest(project), healthOnly, "restored health generation differs")
-	run("new", "service", "userService")
-	s.Contains(fail("start"), "koala gen")
-	fail("new", "service", "UserService")
-	shell := p("internal/service/user/service.go")
-	s.Remove(shell)
+	s.Contains(fail("new", "service", "UserService"), "unexpected project arguments")
+	s.Check(!s.Exists(p("service")), "removed service command created a project")
 	userProto := p("proto/user/v1/user.proto")
+	s.Write(userProto, userContract)
+	s.Contains(fail("start"), "koala gen")
+	shell := p("internal/service/user/service.go")
+	s.Check(!s.Exists(shell), "proto creation unexpectedly created an implementation")
 	orderProto := p("proto/order/v1/order.proto")
 	s.Write(orderProto, strings.ReplaceAll(strings.ReplaceAll(s.Read(userProto), "UserService", "OrderService"), "user", "order"))
 	nested := p("cmd/server")
@@ -394,6 +395,34 @@ func checkWorkflow() {
 	s.Check(s.Exists(filepath.Join(temporary, "installed/koala")), "CLI was not installed")
 	fmt.Println("CLI acceptance passed: manual proto, one-time shells, two services, both transports, inherited fallback, rebuild without generation, freshness, strict checks, ownership, docs, signal forwarding and installation.")
 }
+
+const userContract = `syntax = "proto3";
+
+package user.v1;
+
+import "buf/validate/validate.proto";
+import "google/api/annotations.proto";
+
+option go_package = "example.com/consumer/gen/go/user/v1;userv1";
+
+// UserService is an application-owned API contract.
+service UserService {
+  // Get retrieves a resource by ID. Replace this baseline operation as needed.
+  rpc Get(GetRequest) returns (GetResponse) {
+    option (google.api.http) = {get: "/v1/user/{id}"};
+  }
+}
+
+// GetRequest identifies a resource.
+message GetRequest {
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+// GetResponse contains the resource identifier.
+message GetResponse {
+  string id = 1;
+}
+`
 
 const userProbe = `package main
 import("context";"os";"fmt";"time";pb "example.com/consumer/gen/go/user/v1";"google.golang.org/grpc";"google.golang.org/grpc/credentials/insecure")

@@ -10,7 +10,6 @@ import (
 	"runtime/debug"
 	"strings"
 
-	"github.com/bingyuanng/koala/internal/generate"
 	"github.com/bingyuanng/koala/internal/scaffold"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/semver"
@@ -18,37 +17,7 @@ import (
 
 func newCommand(args []string, out, errout io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: koala new <project> [--module path] | koala new service <name>")
-	}
-	if args[0] == "service" {
-		if len(args) != 2 {
-			return errors.New("usage: koala new service <name>")
-		}
-		root, e := generate.Find(".")
-		if e != nil {
-			return e
-		}
-		module, e := generate.ApplicationImportPath(root)
-		if e != nil {
-			return e
-		}
-		name := args[1]
-		if !regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]*$`).MatchString(name) {
-			return errors.New("service name must be an identifier")
-		}
-		name = strings.ToUpper(name[:1]) + name[1:]
-		if !strings.HasSuffix(name, "Service") {
-			name += "Service"
-		}
-		files, e := scaffold.Render("service", scaffold.Data{ModulePath: module, ProjectName: filepath.Base(root), ServiceName: name, FrameworkVersion: frameworkVersion()})
-		if e != nil {
-			return e
-		}
-		if e = writeFiles(root, files); e != nil {
-			return e
-		}
-		fmt.Fprintln(out, "Created", name, "application-owned contract and shell; run koala gen")
-		return nil
+		return errors.New("usage: koala new <project> [--module path]")
 	}
 	name := args[0]
 	if !regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*$`).MatchString(name) {
@@ -92,7 +61,7 @@ func newCommand(args []string, out, errout io.Writer) error {
 			return errors.New("development CLI requires --framework-version <release> or --framework-path <local-checkout>")
 		}
 	}
-	files, e := scaffold.Render("project", scaffold.Data{ModulePath: *module, ProjectName: name, ServiceName: "UserService", FrameworkVersion: *version, FrameworkPath: *frameworkPath})
+	files, e := scaffold.Render(scaffold.Data{ModulePath: *module, ProjectName: name, FrameworkVersion: *version, FrameworkPath: *frameworkPath})
 	if e != nil {
 		return e
 	}

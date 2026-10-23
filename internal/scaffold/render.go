@@ -1,4 +1,4 @@
-// Package scaffold renders embedded, versioned project and service assets.
+// Package scaffold renders embedded, versioned project assets.
 package scaffold
 
 import (
@@ -24,11 +24,8 @@ var assets embed.FS
 type Data struct {
 	ModulePath       string
 	ProjectName      string
-	ServiceName      string
 	FrameworkVersion string
 	FrameworkPath    string
-	// ServiceDirectory is derived from ServiceName by Render.
-	ServiceDirectory string
 }
 
 type File struct {
@@ -39,14 +36,10 @@ type File struct {
 
 var (
 	modulePathPattern     = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._/-]*$`)
-	serviceNamePattern    = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 	releaseVersionPattern = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?$`)
 )
 
-func Render(kind string, data Data) ([]File, error) {
-	if kind != "project" && kind != "service" {
-		return nil, fmt.Errorf("unknown template set %q", kind)
-	}
+func Render(data Data) ([]File, error) {
 	if !modulePathPattern.MatchString(data.ModulePath) || strings.Contains(data.ModulePath, "..") {
 		return nil, fmt.Errorf("invalid ModulePath")
 	}
@@ -58,22 +51,15 @@ func Render(kind string, data Data) ([]File, error) {
 	if data.ProjectName == "" {
 		return nil, fmt.Errorf("ProjectName is required")
 	}
-	if !serviceNamePattern.MatchString(data.ServiceName) {
-		return nil, fmt.Errorf("ServiceName must be a Go identifier")
-	}
-	if kind == "project" && !releaseVersionPattern.MatchString(data.FrameworkVersion) {
+	if !releaseVersionPattern.MatchString(data.FrameworkVersion) {
 		return nil, fmt.Errorf("FrameworkVersion must be an explicit release version")
 	}
-	data.ServiceDirectory = strings.ToLower(strings.TrimSuffix(data.ServiceName, "Service"))
-	if data.ServiceDirectory == "" {
-		return nil, fmt.Errorf("ServiceName must include a domain name")
-	}
-	root, err := fs.Sub(assets, "templates/"+kind)
+	root, err := fs.Sub(assets, "templates/project")
 	if err != nil {
 		return nil, err
 	}
 	files, err := renderFS(root, data)
-	if err != nil || kind != "project" {
+	if err != nil {
 		return files, err
 	}
 	// Record scaffolded generated files before the first generation. Empty input
