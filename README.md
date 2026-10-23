@@ -6,18 +6,41 @@ contracts and annotated Go service factories. The runtime provides request
 validation, deadlines, structured logging, OpenTelemetry instrumentation, and
 embedded OpenAPI documentation.
 
-## Quickstart
+The latest stable release is
+[v1.0.0](https://github.com/bingyuanng/koala/releases/tag/v1.0.0).
 
-Install and activate [mise](https://mise.jdx.dev/getting-started.html), then install
-Go and the Koala CLI. The repository is currently private, so source
-installation requires repository access and Go private-module configuration until
-it is made public:
+## Prerequisites
+
+- Install and activate [mise](https://mise.jdx.dev/getting-started.html) to manage
+  Go, Buf, and the protobuf generators pinned by each project.
+- Use Go 1.26.10, the version pinned in this repository.
+- The repository is currently private. Source installation and application builds
+  require repository access and Go private-module configuration until it is made
+  public.
+- Generation requires access to the Buf Schema Registry or its cache. The first
+  generation can also download Go dependencies.
+
+## Installation
+
+Install Go and the Koala CLI:
 
 ```sh
 mise use -g go@1.26.10
 go install github.com/bingyuanng/koala/cmd/koala@latest
 export PATH="$(go env GOPATH)/bin:$PATH"
 koala version
+```
+
+Release archives for Linux and macOS on amd64 and arm64 are also available on the
+[latest release page](https://github.com/bingyuanng/koala/releases/latest) to users
+with access. For reproducible installation, replace `@latest` with an explicit
+release tag.
+
+## Quickstart
+
+Create and start an application:
+
+```sh
 koala new my-api --module example.com/my-api
 cd my-api
 mise trust
@@ -26,14 +49,8 @@ koala gen
 koala start
 ```
 
-Release archives for Linux and macOS on amd64 and arm64 are also available on the
-[latest release page](https://github.com/bingyuanng/koala/releases/latest) to users
-with access. For reproducible installation, replace `@latest` with an explicit
-release tag.
-
 The CLI creates an application-owned health service and pins the matching runtime
-version. Generation uses pinned Buf plugins and requires access to the Buf Schema
-Registry or its cache. The first generation can download Go dependencies.
+version. Generation uses pinned Buf plugins.
 
 In another terminal, check the running application:
 
@@ -54,18 +71,6 @@ a rebuild with `koala start`. Contract or factory changes require
 generation. Koala supports unary RPCs and standard HTTP verbs with
 simple path variables; streaming and wildcard/custom HTTP paths are unsupported.
 
-## Documentation
-
-The maintained documentation lives in Notion:
-
-- [Project overview](https://bingsthought.notion.site/Koala-3f62a93ebee08004854ff018cc58406a)
-- [Configuration, CLI, and upgrade guide](https://bingsthought.notion.site/Configuration-and-CLI-guide-3f62a93ebee0819f83badea55aabffa6)
-- [Architecture and design](https://bingsthought.notion.site/Architecture-and-design-3f62a93ebee081169554f0a64b221644)
-- [Implementation plan](https://bingsthought.notion.site/Implementation-plan-3f62a93ebee08168a8d9d589fb983a5c)
-- [Implementation phases](https://bingsthought.notion.site/Implementation-phases-3f62a93ebee081449790ebd40bfa4d0f)
-
-These pages are public and can be read without a Notion account.
-
 ## Compatibility and upgrades
 
 Use matching CLI and runtime versions. Review the
@@ -82,21 +87,28 @@ code, OpenAPI, the bootstrap registry, `.koala/generation.json`, and
 Koala-owned outputs, including local edits, and removes obsolete owned outputs.
 Conflicting unowned files are rejected; edit application source and protobuf
 contracts instead of generated files. Run the application's tests and verify both
-transports before deploying. See the Notion
-[upgrade guide](https://bingsthought.notion.site/Configuration-and-CLI-guide-3f62a93ebee0819f83badea55aabffa6)
-for migration details, the full procedure, and rollback guidance.
+transports before deploying.
 
-## Working on Koala
+## Contributing
 
-Install and activate [mise](https://mise.jdx.dev/getting-started.html), then run
-these commands from the repository root. The checked-in `mise.toml` pins Go, Buf,
-and the protobuf generators.
+Include relevant tests with behavior changes and describe how you verified them
+in your pull request.
+
+### Development setup
+
+Clone the repository using your GitHub credentials, then install the pinned tools:
 
 ```sh
+git clone git@github.com:bingyuanng/koala.git
+cd koala
 mise trust
 mise install
 go run ./cmd/koala help
 ```
+
+The checked-in `mise.toml` pins Go, Buf, and the protobuf generators.
+
+### Try a local change
 
 To try the current checkout in a separate application, build the development CLI
 and explicitly select this checkout as its runtime:
@@ -117,9 +129,12 @@ Choose an unused project directory. Development CLI builds require either
 `--framework-path` or `--framework-version`; release builds accept
 `--framework-version` and default to their matching runtime version.
 
-Run the Go checks with:
+### Checks
+
+Run these checks from the repository root before opening a pull request:
 
 ```sh
+scripts/check-format.sh
 go build ./...
 go test ./...
 go vet ./...
