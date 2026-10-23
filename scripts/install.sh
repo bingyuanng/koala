@@ -10,7 +10,7 @@ if ! command -v mise >/dev/null 2>&1; then
   exit 1
 fi
 if ! command -v go >/dev/null 2>&1; then
-  echo 'koala: Go is required to install the CLI; install it with mise use -g go@1.26.9' >&2
+  echo 'koala: Go is required to install the CLI; install it with mise use -g go@1.26.10' >&2
   exit 1
 fi
 

@@ -32,7 +32,8 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-func TestTLSGateway(t *testing.T) {
+func writeTLSCertificate(t *testing.T) (string, string) {
+	t.Helper()
 	key, e := rsa.GenerateKey(rand.Reader, 2048)
 	if e != nil {
 		t.Fatal(e)
@@ -44,8 +45,19 @@ func TestTLSGateway(t *testing.T) {
 	}
 	dir := t.TempDir()
 	certFile, keyFile := filepath.Join(dir, "cert.pem"), filepath.Join(dir, "key.pem")
-	os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0600)
-	os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}), 0600)
+	for path, data := range map[string][]byte{
+		certFile: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
+		keyFile:  pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}),
+	} {
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return certFile, keyFile
+}
+
+func TestTLSGateway(t *testing.T) {
+	certFile, keyFile := writeTLSCertificate(t)
 	c := testConfig()
 	c.Server.GRPC.CertFile = certFile
 	c.Server.GRPC.KeyFile = keyFile

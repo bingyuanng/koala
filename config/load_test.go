@@ -111,6 +111,23 @@ func TestLoaderRejectsInvalidSourcesWithoutSecrets(t *testing.T) {
 		})
 	}
 }
+
+func TestConfigurationFileDiagnostics(t *testing.T) {
+	dir := t.TempDir()
+	for _, tt := range []struct {
+		name, path, want string
+	}{
+		{"missing", filepath.Join(dir, "SECRET-missing"), "config: cannot read configuration file: file does not exist"},
+		{"read failure", dir, "config: cannot read configuration file: file I/O error"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := LoadFile(tt.path, Options[appConfig]{Env: []string{}})
+			if err == nil || err.Error() != tt.want {
+				t.Fatalf("expected %q, got %v", tt.want, err)
+			}
+		})
+	}
+}
 func TestEnvironmentPathCollisions(t *testing.T) {
 	type bad struct {
 		One string `json:"name"`

@@ -7,10 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
+	"github.com/bingyuanng/koala/internal/safefile"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
@@ -22,9 +22,17 @@ func (a *App) transportCredentials() (grpc.ServerOption, credentials.TransportCr
 	var dialCredentials credentials.TransportCredentials = insecure.NewCredentials()
 	var serverOption grpc.ServerOption
 	if a.server.GRPC.CertFile != "" {
-		cert, e := tls.LoadX509KeyPair(a.server.GRPC.CertFile, a.server.GRPC.KeyFile)
+		certPEM, e := safefile.ReadFile(a.server.GRPC.CertFile, "koala: cannot read TLS certificate")
 		if e != nil {
-			return nil, nil, errors.New("koala: cannot load TLS certificate")
+			return nil, nil, e
+		}
+		keyPEM, e := safefile.ReadFile(a.server.GRPC.KeyFile, "koala: cannot read TLS private key")
+		if e != nil {
+			return nil, nil, e
+		}
+		cert, e := tls.X509KeyPair(certPEM, keyPEM)
+		if e != nil {
+			return nil, nil, errors.New("koala: invalid TLS certificate or private key pair")
 		}
 		serverOption = grpc.Creds(credentials.NewTLS(&tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}))
 		roots, e := x509.SystemCertPool()
@@ -32,9 +40,12 @@ func (a *App) transportCredentials() (grpc.ServerOption, credentials.TransportCr
 			roots = x509.NewCertPool()
 		}
 		if a.server.GRPC.CAFile != "" {
-			pem, e := os.ReadFile(a.server.GRPC.CAFile)
-			if e != nil || !roots.AppendCertsFromPEM(pem) {
-				return nil, nil, errors.New("koala: cannot load gateway CA")
+			pem, e := safefile.ReadFile(a.server.GRPC.CAFile, "koala: cannot read gateway CA")
+			if e != nil {
+				return nil, nil, e
+			}
+			if !roots.AppendCertsFromPEM(pem) {
+				return nil, nil, errors.New("koala: gateway CA contains no valid certificates")
 			}
 		}
 		name := a.server.GRPC.ServerName

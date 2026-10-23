@@ -12,21 +12,62 @@ import (
 )
 
 func TestDescriptorScopeAndStreaming(t *testing.T) {
-	root := t.TempDir()
-	os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/app\n"), 0600)
-	os.MkdirAll(filepath.Join(root, "proto/user/v1"), 0700)
-	os.WriteFile(filepath.Join(root, "proto/user/v1/user.proto"), nil, 0600)
-	app := &descriptorpb.FileDescriptorProto{Name: proto.String("user/v1/user.proto"), Package: proto.String("user.v1"), Options: &descriptorpb.FileOptions{GoPackage: proto.String("example.com/app/gen/go/user/v1;userv1")}, Service: []*descriptorpb.ServiceDescriptorProto{{Name: proto.String("UserService"), Method: []*descriptorpb.MethodDescriptorProto{{Name: proto.String("Get")}}}}}
-	dependency := &descriptorpb.FileDescriptorProto{Name: proto.String("dependency.proto"), Service: []*descriptorpb.ServiceDescriptorProto{{Name: proto.String("MustNotHost")}}}
-	bytes, _ := proto.Marshal(&descriptorpb.FileDescriptorSet{File: []*descriptorpb.FileDescriptorProto{app, dependency}})
-	services, e := servicesFrom(root, Config{}, bytes)
-	if e != nil || len(services) != 1 {
-		t.Fatalf("scope %v %v", services, e)
-	}
-	app.Service[0].Method[0].ServerStreaming = proto.Bool(true)
-	bytes, _ = proto.Marshal(&descriptorpb.FileDescriptorSet{File: []*descriptorpb.FileDescriptorProto{app}})
-	if _, e = servicesFrom(root, Config{}, bytes); e == nil {
-		t.Fatal("streaming accepted")
+	for _, tt := range []struct {
+		name, source, wantError    string
+		clientStream, serverStream bool
+		wantServices               int
+	}{
+		{name: "application and imported dependency", source: "file", wantServices: 1},
+		{name: "imported descriptors only", source: "missing"},
+		{name: "filesystem failure", source: "symlink loop", wantError: "inspect protobuf source user/v1/user.proto"},
+		{name: "client streaming", source: "file", clientStream: true, wantError: "streaming RPCs are unsupported"},
+		{name: "server streaming", source: "file", serverStream: true, wantError: "streaming RPCs are unsupported"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/app\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(root, "proto/user/v1/user.proto")
+			if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+				t.Fatal(err)
+			}
+			switch tt.source {
+			case "file":
+				if err := os.WriteFile(path, nil, 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "symlink loop":
+				if err := os.Symlink(path, path); err != nil {
+					t.Fatal(err)
+				}
+			}
+			app := &descriptorpb.FileDescriptorProto{
+				Name: proto.String("user/v1/user.proto"), Package: proto.String("user.v1"),
+				Options: &descriptorpb.FileOptions{GoPackage: proto.String("example.com/app/gen/go/user/v1;userv1")},
+				Service: []*descriptorpb.ServiceDescriptorProto{{Name: proto.String("UserService"), Method: []*descriptorpb.MethodDescriptorProto{{
+					Name: proto.String("Get"), ClientStreaming: proto.Bool(tt.clientStream), ServerStreaming: proto.Bool(tt.serverStream),
+				}}}},
+			}
+			dependency := &descriptorpb.FileDescriptorProto{Name: proto.String("dependency.proto"), Service: []*descriptorpb.ServiceDescriptorProto{{Name: proto.String("MustNotHost")}}}
+			data, err := proto.Marshal(&descriptorpb.FileDescriptorSet{File: []*descriptorpb.FileDescriptorProto{app, dependency}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			services, err := servicesFrom(root, Config{}, data)
+			if tt.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+					t.Fatalf("expected %q, got %v", tt.wantError, err)
+				}
+				return
+			}
+			if err != nil || len(services) != tt.wantServices {
+				t.Fatalf("services = %v, error = %v", services, err)
+			}
+			if len(services) > 0 && services[0].Name != "user.v1.UserService" {
+				t.Fatalf("hosted an imported service: %v", services)
+			}
+		})
 	}
 }
 

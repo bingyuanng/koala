@@ -19,7 +19,6 @@ Usage:
   koala help
   koala version
   koala new <project> [--module path] [--framework-version version]
-  koala new service <name>
   koala gen [--buf path] [--strict] [--local-plugins directory]
   koala config <dev|stg|prd>
   koala config <dev|stg|prd> env

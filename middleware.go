@@ -16,12 +16,10 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
-	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 )
 
 // Only this app's gateway can suppress the duplicate RPC completion record.
@@ -73,63 +71,70 @@ func (a *App) interceptor(v protovalidate.Validator, p *observability.Providers)
 				err = status.FromContextError(requestContext.Err()).Err()
 			}
 			if err != nil {
-				if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-					err = status.FromContextError(err).Err()
-				} else if _, ok := status.FromError(err); !ok {
-					a.logger.ErrorContext(ctx, "application request failed", "method", info.FullMethod, "error", err)
-					err = status.Error(codes.Internal, "internal server error")
-				}
+				err = a.requestError(ctx, info.FullMethod, err)
 			}
 			if !gatewayRequest {
 				a.logger.InfoContext(ctx, "RPC completed", "transport", "grpc", "method", info.FullMethod, "status", status.Code(err).String(), "duration_ms", float64(time.Since(start).Microseconds())/1000)
 			}
 		}()
 		for _, hook := range []Hook{a.options.Authenticate, a.options.Authorize} {
-			if hook != nil {
-				nextContext, hookError := hook(ctx, info.FullMethod)
-				if hookError != nil {
-					return nil, hookError
-				}
-				if nextContext == nil {
-					return nil, status.Error(codes.Internal, "invalid application hook context")
-				}
-				// Hooks may attach values, but cannot extend or detach the
-				// request budget or upstream cancellation.
-				parent := ctx
-				deadline, _ := parent.Deadline()
-				bounded, release := context.WithDeadline(nextContext, deadline)
-				stop := context.AfterFunc(parent, func() {
-					if parent.Err() != context.DeadlineExceeded {
-						release()
-					}
-				})
-				defer func() { stop(); release() }()
-				ctx = bounded
-				if !trace.SpanContextFromContext(ctx).IsValid() {
-					ctx = trace.ContextWithSpan(ctx, trace.SpanFromContext(parent))
-				}
+			if hook == nil {
+				continue
 			}
+			nextContext, release, hookError := applyRequestHook(ctx, info.FullMethod, hook)
+			if hookError != nil {
+				return nil, hookError
+			}
+			defer release()
+			ctx = nextContext
 		}
-		if msg, ok := req.(proto.Message); ok {
-			if e := v.Validate(msg); e != nil {
-				var violations *protovalidate.ValidationError
-				if !errors.As(e, &violations) {
-					return nil, status.Error(codes.Internal, "request validation unavailable")
-				}
+		if err := validateRequest(v, req); err != nil {
+			if status.Code(err) == codes.InvalidArgument {
 				invalid.Add(ctx, 1, metric.WithAttributes(attribute.String("rpc.method", info.FullMethod)))
-				details := &errdetails.BadRequest{}
-				for _, violation := range violations.Violations {
-					field := protovalidate.FieldPathString(violation.Proto.GetField())
-
-					details.FieldViolations = append(details.FieldViolations, &errdetails.BadRequest_FieldViolation{Field: field, Description: "constraint violated: " + violation.Proto.GetRuleId()})
-				}
-				result, _ := status.New(codes.InvalidArgument, "request validation failed").WithDetails(details)
-				return nil, result.Err()
 			}
+			return nil, err
 		}
 		return next(ctx, req)
 	}
 }
+
+// applyRequestHook preserves the request deadline and cancellation when a hook
+// returns a different context, and inherits the request trace if the hook omits it.
+// The caller establishes the deadline and releases each context after dispatch.
+func applyRequestHook(parent context.Context, method string, hook Hook) (context.Context, context.CancelFunc, error) {
+	ctx, err := hook(parent, method)
+	if err != nil {
+		return nil, nil, err
+	}
+	if ctx == nil {
+		return nil, nil, status.Error(codes.Internal, "invalid application hook context")
+	}
+	deadline, _ := parent.Deadline()
+	ctx, cancel := context.WithDeadline(ctx, deadline)
+	stop := context.AfterFunc(parent, func() {
+		// Let the deadline timer preserve DeadlineExceeded instead of replacing
+		// it with Canceled when the parent's budget expires.
+		if parent.Err() != context.DeadlineExceeded {
+			cancel()
+		}
+	})
+	if !trace.SpanContextFromContext(ctx).IsValid() {
+		ctx = trace.ContextWithSpan(ctx, trace.SpanFromContext(parent))
+	}
+	return ctx, func() { stop(); cancel() }, nil
+}
+
+func (a *App) requestError(ctx context.Context, method string, err error) error {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return status.FromContextError(err).Err()
+	}
+	if _, ok := status.FromError(err); ok {
+		return err
+	}
+	a.logger.ErrorContext(ctx, "application request failed", "method", method, "error", err)
+	return status.Error(codes.Internal, "internal server error")
+}
+
 func otelRoute(pattern string, h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		span := trace.SpanFromContext(r.Context())

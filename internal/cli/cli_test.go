@@ -15,7 +15,7 @@ func TestMissingMiseRejectsOperationsBeforeWriting(t *testing.T) {
 	t.Chdir(dir)
 	t.Setenv("PATH", dir)
 	for _, args := range [][]string{
-		{"new", "my-api"}, {"new", "service", "user"},
+		{"new", "my-api"},
 		{"gen"}, {"generate"}, {"config", "prd", "env"}, {"start"},
 	} {
 		var stdout, stderr bytes.Buffer
@@ -43,6 +43,7 @@ func TestCommands(t *testing.T) {
 	}{
 		{nil, 0, "Usage:"}, {[]string{"--help"}, 0, "Usage:"}, {[]string{"version"}, 0, "koala dev"},
 		{[]string{"unknown"}, 2, ""}, {[]string{"help", "extra"}, 2, ""},
+		{[]string{"new", "service", "Accounts"}, 1, ""},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := Run(tt.args, &stdout, &stderr); code != tt.code {

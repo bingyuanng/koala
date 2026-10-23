@@ -11,6 +11,10 @@ koala gen
 koala start
 ```
 
+To add a service, define its protobuf contract under `proto/` and run `koala gen`.
+Generation creates its Go implementation shell and registration. Implement its
+RPC methods in the shell, then rebuild with `koala start`.
+
 `mise install` also installs the pinned `gopls` language server for your editor.
 
 With `KOALA_ENV` unset or empty, the app defaults to `dev`. It loads defaults from
