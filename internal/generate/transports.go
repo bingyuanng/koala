@@ -63,14 +63,11 @@ func prepareTransports(ctx context.Context, root string, previous manifest, cont
 	if err != nil {
 		return nil, err
 	}
-	args := []string{"generate", "--output", stage}
-	if o.LocalPlugins != "" {
-		template, err := localTemplate(root, o.LocalPlugins, stage, pinned)
-		if err != nil {
-			return nil, err
-		}
-		args = append(args, "--template", template)
+	template, err := localTemplate(root, stage, pinned)
+	if err != nil {
+		return nil, err
 	}
+	args := []string{"generate", "--output", stage, "--template", template}
 	if err := command(ctx, root, o.Output, buf, args...); err != nil {
 		return nil, err
 	}

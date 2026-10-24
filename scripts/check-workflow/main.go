@@ -129,7 +129,6 @@ func server(cli, project string, fn func(string, string)) {
 	}
 }
 func checkWorkflow() {
-	plugins := flag.String("local-plugins", "", "Directory containing the four exactly pinned protoc plugins; default uses Buf remote plugins")
 	flag.Parse()
 	s.Check(flag.NArg() == 0, "unexpected arguments: %v", flag.Args())
 	root := s.Root()
@@ -148,11 +147,7 @@ func checkWorkflow() {
 	buf, err := exec.LookPath("buf")
 	s.Must(err)
 	generationArgs := []string{"--buf", buf}
-	if *plugins != "" {
-		absolute, err := filepath.Abs(*plugins)
-		s.Must(err)
-		generationArgs = append(generationArgs, "--local-plugins", absolute)
-	}
+
 	gen := func(strict, failure bool) string {
 		args := []string{"gen"}
 		if strict {

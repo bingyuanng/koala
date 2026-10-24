@@ -19,13 +19,13 @@ Usage:
   koala help
   koala version
   koala new <project> [--module path] [--framework-version version]
-  koala gen [--buf path] [--strict] [--local-plugins directory]
+  koala gen [--buf path] [--strict]
   koala config <dev|stg|prd>
   koala config <dev|stg|prd> env
   koala start [--gen]
 
 Requires mise on PATH: https://mise.jdx.dev/getting-started.html
-New projects include mise.toml with pinned Go and Buf versions.
+New projects include mise.toml with pinned Go, Buf, and local code generators.
 
 `
 

@@ -10,10 +10,9 @@ import (
 )
 
 type Options struct {
-	LocalPlugins string
-	Buf          string
-	Strict       bool
-	Output       io.Writer
+	Buf    string
+	Strict bool
+	Output io.Writer
 }
 
 // Run stages transports, installs them for type checking, resolves services,

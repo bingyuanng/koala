@@ -19,7 +19,6 @@ import (
 func generateCommand(name string, args []string, out, errout io.Writer) error {
 	f := flags(name, errout)
 	buf := f.String("buf", "", "pinned Buf executable")
-	localPlugins := f.String("local-plugins", "", "explicit directory of pinned local protoc plugins")
 	strict := f.Bool("strict", false, "reject inherited Unimplemented RPCs")
 	gen := f.Bool("gen", false, "generate before starting")
 	if e := f.Parse(args); e != nil {
@@ -39,7 +38,7 @@ func generateCommand(name string, args []string, out, errout io.Writer) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if name != "start" || *gen {
-		if e = generate.Run(ctx, root, generate.Options{Buf: *buf, LocalPlugins: *localPlugins, Strict: *strict, Output: out}); e != nil {
+		if e = generate.Run(ctx, root, generate.Options{Buf: *buf, Strict: *strict, Output: out}); e != nil {
 			return e
 		}
 	}
