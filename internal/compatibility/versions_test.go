@@ -63,15 +63,13 @@ func TestVersionContract(t *testing.T) {
 		}
 		check("go", contract.Go)
 		check("buf", contract.Buf)
-		if name == "mise.toml" {
-			for pkg, remote := range map[string]string{
-				"google.golang.org/protobuf/cmd/protoc-gen-go":                      "buf.build/protocolbuffers/go",
-				"google.golang.org/grpc/cmd/protoc-gen-go-grpc":                     "buf.build/grpc/go",
-				"github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway": "buf.build/grpc-ecosystem/gateway",
-				"github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2":    "buf.build/grpc-ecosystem/openapiv2",
-			} {
-				check(fmt.Sprintf("%q", "go:"+pkg), strings.TrimPrefix(contract.Plugins[remote], "v"))
-			}
+		for pkg, remote := range map[string]string{
+			"google.golang.org/protobuf/cmd/protoc-gen-go":                      "buf.build/protocolbuffers/go",
+			"google.golang.org/grpc/cmd/protoc-gen-go-grpc":                     "buf.build/grpc/go",
+			"github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway": "buf.build/grpc-ecosystem/gateway",
+			"github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2":    "buf.build/grpc-ecosystem/openapiv2",
+		} {
+			check(fmt.Sprintf("%q", "go:"+pkg), strings.TrimPrefix(contract.Plugins[remote], "v"))
 		}
 	}
 
@@ -99,24 +97,31 @@ func TestVersionContract(t *testing.T) {
 	}
 
 	expected := []string{}
-	for name, version := range contract.Plugins {
-		expected = append(expected, name+":"+version)
+	for _, name := range []string{"protoc-gen-go", "protoc-gen-go-grpc", "protoc-gen-grpc-gateway", "protoc-gen-openapiv2"} {
+		expected = append(expected, name)
 	}
 	slices.Sort(expected)
 	for _, name := range []string{"tools/buf.gen.yaml", "internal/testdata/runtime/buf.gen.yaml", "internal/scaffold/templates/project/buf.gen.yaml"} {
 		var settings struct {
-			Plugins []struct{ Remote string } `yaml:"plugins"`
+			Plugins []struct {
+				Local    string
+				Remote   string
+				Strategy string
+			} `yaml:"plugins"`
 		}
 		if err := yaml.Unmarshal(readVersionFile(t, root, name), &settings); err != nil {
 			t.Fatal(err)
 		}
 		actual := []string{}
 		for _, plugin := range settings.Plugins {
-			actual = append(actual, plugin.Remote)
+			actual = append(actual, plugin.Local)
+			if plugin.Remote != "" || plugin.Strategy != "all" {
+				t.Errorf("%s: plugins must run locally with strategy all", name)
+			}
 		}
 		slices.Sort(actual)
 		if !reflect.DeepEqual(actual, expected) {
-			t.Errorf("%s: remote plugins differ from tools/versions.json", name)
+			t.Errorf("%s: local plugins differ from tools/versions.json", name)
 		}
 	}
 	for _, name := range []string{"buf.yaml", "buf.lock", "buf.gen.yaml"} {

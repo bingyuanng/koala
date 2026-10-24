@@ -2,3 +2,7 @@
 go = "1.26.10"
 buf = "1.73.0"
 "go:golang.org/x/tools/gopls" = "0.24.0"
+"go:google.golang.org/protobuf/cmd/protoc-gen-go" = "1.36.12"
+"go:google.golang.org/grpc/cmd/protoc-gen-go-grpc" = "1.6.2"
+"go:github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway" = "2.31.0"
+"go:github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2" = "2.31.0"

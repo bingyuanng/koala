@@ -47,8 +47,9 @@ curl http://127.0.0.1:8080/healthz
 Add protobuf services under `proto/`, run `koala gen`, and implement the generated
 Go service shells.
 
-Repository access and Go private-module configuration are currently required.
-Generation needs Buf Schema Registry access or cached dependencies.
+`mise install` installs the pinned code generators, and `koala gen` runs them
+locally. Network access is needed to download tools and dependencies that are
+not already cached.
 
 ## Contributing
 
