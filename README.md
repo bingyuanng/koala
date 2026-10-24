@@ -23,6 +23,18 @@ go install github.com/bingyuanng/koala/cmd/koala@latest
 export PATH="$(go env GOPATH)/bin:$PATH"
 ```
 
+Upgrade the CLI to the latest version:
+
+```sh
+koala upgrade
+```
+
+`koala update` is an alias. The command requires Go on PATH and write access to
+the CLI's installation directory. It replaces the running CLI after a successful
+download and build. Existing projects keep their pinned framework dependency.
+To upgrade that dependency, run `go get github.com/bingyuanng/koala@latest` and
+`go mod tidy` in the project, then run `koala gen` and your tests.
+
 Create and run an API:
 
 ```sh

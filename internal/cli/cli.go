@@ -18,14 +18,16 @@ const help = `Koala CLI
 Usage:
   koala help
   koala version
+  koala upgrade
   koala new <project> [--module path] [--framework-version version]
   koala gen [--buf path] [--strict]
   koala config <dev|stg|prd>
   koala config <dev|stg|prd> env
   koala start [--gen]
 
-Requires mise on PATH: https://mise.jdx.dev/getting-started.html
+Project commands require mise on PATH: https://mise.jdx.dev/getting-started.html
 New projects include mise.toml with pinned Go, Buf, and local code generators.
+koala upgrade requires Go on PATH; koala update is an alias.
 
 `
 
@@ -56,13 +58,15 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	switch args[0] {
-	case "new", "gen", "generate", "config", "start":
-		if _, err := exec.LookPath("mise"); err != nil {
+	case "new", "gen", "generate", "config", "start", "upgrade", "update":
+		if _, err := exec.LookPath("mise"); args[0] != "upgrade" && args[0] != "update" && err != nil {
 			fmt.Fprintln(stderr, "koala: mise is required on PATH; install and activate it: https://mise.jdx.dev/getting-started.html")
 			return 1
 		}
 		var err error
 		switch args[0] {
+		case "upgrade", "update":
+			err = upgradeCommand(args[1:], stdout, stderr)
 		case "new":
 			err = newCommand(args[1:], stdout, stderr)
 		case "config":
