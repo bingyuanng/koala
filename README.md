@@ -1,6 +1,6 @@
 # Koala
 
-A Go backend framework for protobuf-first gRPC and HTTP/JSON APIs.
+A Go backend framework for protobuf-first gRPC and HTTP/JSON APIs. Project inspired by Grabkit, a internal tool used in one of my previous company.
 
 [Releases](https://github.com/bingyuanng/koala/releases)
 
