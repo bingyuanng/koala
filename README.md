@@ -18,7 +18,7 @@ Install and activate [mise](https://mise.jdx.dev/getting-started.html), then ins
 Go and the Koala CLI:
 
 ```sh
-mise use -g go@1.26.10
+mise use -g go@1.26.11
 go install github.com/bingyuanng/koala/cmd/koala@latest
 export PATH="$(go env GOPATH)/bin:$PATH"
 ```

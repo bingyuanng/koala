@@ -38,7 +38,7 @@ func upgradeCommand(args []string, out, errout io.Writer) error {
 func upgradeExecutable(executable string, out, errout io.Writer) error {
 	goBinary, err := exec.LookPath("go")
 	if err != nil {
-		return errors.New("koala: Go is required to upgrade the CLI; install it with mise use -g go@1.26.10")
+		return errors.New("koala: Go is required to upgrade the CLI; install it with mise use -g go@1.26.11")
 	}
 	// Stage beside the executable so the final rename stays on the same filesystem.
 	// A failed download or build leaves the installed CLI untouched.
